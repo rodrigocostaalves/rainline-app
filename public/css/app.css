@@ -302,7 +302,10 @@ input:focus,select:focus,textarea:focus{
   background:rgba(255,255,255,.08);color:#fff;font-size:20px;font-weight:700;cursor:pointer;
 }
 .zoom-pad button:active{background:rgba(255,255,255,.24)}
-.zoom-pad .zfit{width:auto;padding:0 13px;font-size:13px;font-family:inherit}
+.zoom-pad{flex-wrap:wrap}
+.zoom-pad .zfit{width:auto;padding:0 12px;font-size:12.5px;font-family:inherit;height:38px}
+.zoom-pad .zfit.is-on{background:var(--tape);color:#2B2000;border-color:var(--tape)}
+.zoom-tip{width:100%;text-align:left;margin-top:-2px}
 #photo-zoom{
   font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--tape);
   font-weight:600;min-width:42px;text-align:center;
