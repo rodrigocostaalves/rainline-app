@@ -216,17 +216,83 @@
   var mapMode = 'draw';   // 'draw' = toque cria ponto · 'edit' = toque seleciona
   var selected = null;    // índice da linha selecionada
 
+  /* ---------- camadas de imagem ---------- */
+  // camada que fala com servidores ArcGIS que não são Web Mercator (condados),
+  // pedindo a imagem já reprojetada trecho a trecho
+  var ArcGISExport = null;
+  function defineArcGISExport() {
+    if (ArcGISExport || typeof L === 'undefined') return;
+    ArcGISExport = L.TileLayer.extend({
+    getTileUrl: function (c) {
+      var R = 20037508.342789244;
+      var res = (2 * R) / (256 * Math.pow(2, c.z));
+      var minx = -R + c.x * 256 * res;
+      var maxx = minx + 256 * res;
+      var maxy = R - c.y * 256 * res;
+      var miny = maxy - 256 * res;
+      return this.options.base + '/export?bbox=' + [minx, miny, maxx, maxy].join(',') +
+             '&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&transparent=false&f=image';
+      }
+    });
+  }
+
+  var LAYERS = [
+    { id: 'esri', name: 'Esri', type: 'xyz', max: 19,
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Imagery © Esri, Maxar, Earthstar Geographics' },
+    { id: 'clarity', name: 'Esri Clarity', type: 'xyz', max: 20,
+      url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Imagery © Esri Clarity' },
+    { id: 'ocfl', name: 'Orange County', type: 'arcgis', max: 21,
+      base: 'https://ocgis4.ocfl.net/arcgis/rest/services/Public_Aerial_Base/MapServer',
+      credit: 'Aerial © Orange County, FL' },
+    { id: 'usgs', name: 'USGS', type: 'xyz', max: 16,
+      url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',
+      credit: 'Imagery © USGS' }
+  ];
+  var layerIdx = 0, baseLayer = null, loupeBase = null;
+
+  function makeLayer(def) {
+    var o = { maxNativeZoom: def.max, maxZoom: 22, attribution: def.credit };
+    if (def.type === 'arcgis') {
+      defineArcGISExport();
+      o.base = def.base;
+      return new ArcGISExport('', o);
+    }
+    return L.tileLayer(def.url, o);
+  }
+
+  function applyLayer(i) {
+    if (!map) return;
+    layerIdx = (i + LAYERS.length) % LAYERS.length;
+    var def = LAYERS[layerIdx];
+    if (baseLayer) map.removeLayer(baseLayer);
+    baseLayer = makeLayer(def).addTo(map);
+    baseLayer.bringToBack();
+    if (loupeMap) {
+      if (loupeBase) loupeMap.removeLayer(loupeBase);
+      loupeBase = makeLayer(def).addTo(loupeMap);
+      loupeBase.bringToBack();
+    }
+    $('#btn-layer').textContent = 'Imagem: ' + def.name;
+    try { localStorage.setItem('rainline.layer', def.id); } catch (e) {}
+  }
+
   function initMap() {
     if (map) return;
+    if (typeof L === 'undefined') { toast('Mapa não carregou. Verifique a internet e recarregue.'); return; }
+    defineArcGISExport();
     map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 22 })
       .setView([28.5384, -81.3789], 18); // Orlando
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxNativeZoom: 19, maxZoom: 22,
-      attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
-    }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
     drawLayer = L.layerGroup().addTo(map);
     initLoupe();
+    var saved = 0;
+    try {
+      var id = localStorage.getItem('rainline.layer');
+      LAYERS.forEach(function (l, i) { if (l.id === id) saved = i; });
+    } catch (e) {}
+    applyLayer(saved);
 
     map.on('click', function (e) {
       if (!job) return;
@@ -377,9 +443,6 @@
       dragging: false, touchZoom: false, scrollWheelZoom: false,
       doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false, inertia: false
     }).setView(map.getCenter(), 21);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxNativeZoom: 19, maxZoom: 22
-    }).addTo(loupeMap);
     loupeLayer = L.layerGroup().addTo(loupeMap);
   }
 
@@ -482,6 +545,17 @@
     var c = map.getCenter();
     window.open('https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' +
                 c.lat.toFixed(6) + ',' + c.lng.toFixed(6), '_blank');
+  });
+
+  $('#btn-layer').addEventListener('click', function () {
+    applyLayer(layerIdx + 1);
+    toast('Imagem: ' + LAYERS[layerIdx].name + '. Se ficar em branco, toque de novo.');
+  });
+
+  $('#btn-enhance').addEventListener('click', function () {
+    var on = document.body.classList.toggle('tiles-boost');
+    $('#btn-enhance').classList.toggle('is-on', on);
+    toast(on ? 'Contraste reforçado.' : 'Imagem original.');
   });
 
   $('#btn-relocate').addEventListener('click', useGps);
