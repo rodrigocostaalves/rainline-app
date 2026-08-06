@@ -633,6 +633,22 @@
     a.click();
   });
 
+  $('#btn-refresh').addEventListener('click', function () {
+    toast('Buscando a versão mais nova…');
+    var jobs = [];
+    if (window.caches) jobs.push(caches.keys().then(function (ks) {
+      return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+    }));
+    if (navigator.serviceWorker) jobs.push(
+      navigator.serviceWorker.getRegistrations().then(function (rs) {
+        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      })
+    );
+    Promise.all(jobs).catch(function () {}).then(function () {
+      setTimeout(function () { location.reload(true); }, 400);
+    });
+  });
+
   /* ---------- boot ---------- */
   if (load(K.sess, null)) go('home');
   if ('serviceWorker' in navigator) {
