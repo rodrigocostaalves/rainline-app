@@ -77,7 +77,7 @@
   function newJob() {
     job = {
       id: 'Q' + Date.now().toString(36).toUpperCase(),
-      client: {}, runs: [], overrides: {},
+      client: {}, runs: [], manual: [], overrides: {},
       size: 5, stories: 1, color: '', discount: 0, taxPct: 0, savedAt: null
     };
     $('#form-job').reset();
@@ -391,7 +391,7 @@
   }
 
   function updateTape() {
-    var m = Calc.measure(job ? job.runs : [], settings.calibration);
+    var m = Calc.measure(job ? job.runs : [], settings.calibration, job ? job.manual : []);
     var el = $('#read-feet'), v = String(Math.round(m.feet));
     if (el.textContent !== v) {
       el.textContent = v;
@@ -558,10 +558,16 @@
     toast(on ? 'Contraste reforçado.' : 'Imagem original.');
   });
 
+  $('#rail-toggle').addEventListener('click', function () {
+    var r = $('#map-rail');
+    var closed = r.classList.toggle('is-closed');
+    $('#rail-toggle').textContent = closed ? '‹' : '›';
+  });
+
   $('#btn-relocate').addEventListener('click', useGps);
   $('#btn-find').addEventListener('click', geocode);
   $('#btn-to-materials').addEventListener('click', function () {
-    var m = Calc.measure(job.runs, settings.calibration);
+    var m = Calc.measure(job.runs, settings.calibration, job.manual);
     if (m.feet < 1) { toast('Desenhe pelo menos uma linha sobre o beiral.'); return; }
     job.overrides = {};
     go('materials');
@@ -598,9 +604,228 @@
     toast('Exemplo carregado. Arraste os pontos amarelos para ver a medida mudar.');
   });
 
+  /* ---------- medir na foto (fachada / Street View) ----------
+     Foto não tem escala. O usuário traça uma referência de tamanho conhecido
+     (porta de garagem, porta comum) e o app converte pixel em pé por
+     proporção. Vale para linhas no mesmo plano da fachada. */
+  var ph = {
+    img: null, w: 0, h: 0,          // imagem e tamanho natural
+    fit: { x: 0, y: 0, s: 1 },      // como ela está desenhada na tela
+    step: 'ref',
+    ref: [],                        // 2 pontos da referência
+    runs: [[]],                     // linhas medidas, em pixels da imagem
+    scale: 0,                       // pés por pixel
+    level: 1
+  };
+
+  function photoCanvas() { return document.getElementById('photo-canvas'); }
+
+  function openPhoto() {
+    go('photo');
+    setTimeout(drawPhoto, 60);
+  }
+
+  $('#btn-photo').addEventListener('click', openPhoto);
+  $('#btn-pick').addEventListener('click', function () { $('#photo-file').click(); });
+  $('#btn-photo-pick2').addEventListener('click', function () { $('#photo-file').click(); });
+
+  $('#photo-file').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var img = new Image();
+    img.onload = function () {
+      ph.img = img; ph.w = img.naturalWidth; ph.h = img.naturalHeight;
+      ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.step = 'ref';
+      setPhotoStep('ref');
+      $('#photo-empty').hidden = true;
+      drawPhoto();
+      toast('Agora trace a referência: dois toques nas bordas da porta da garagem.');
+    };
+    img.onerror = function () { toast('Não consegui abrir essa imagem.'); };
+    img.src = URL.createObjectURL(f);
+  });
+
+  function setPhotoStep(s) {
+    ph.step = s;
+    $$('[data-pstep]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.pstep === s); });
+    $('#ref-row').style.opacity = s === 'ref' ? '1' : '.5';
+  }
+  $$('[data-pstep]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (b.dataset.pstep === 'measure' && !ph.scale) { toast('Trace a referência primeiro.'); return; }
+      setPhotoStep(b.dataset.pstep);
+    });
+  });
+
+  $$('[data-ref]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('[data-ref]').forEach(function (o) { o.classList.remove('is-on'); });
+      b.classList.add('is-on');
+      $('#ref-feet').value = b.dataset.ref;
+      recalcPhoto();
+    });
+  });
+  $('#ref-feet').addEventListener('input', recalcPhoto);
+
+  $$('[data-plevel]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('[data-plevel]').forEach(function (o) { o.classList.remove('is-on'); });
+      b.classList.add('is-on');
+      ph.level = +b.dataset.plevel;
+    });
+  });
+
+  // toque na imagem
+  photoCanvas().addEventListener('click', function (ev) {
+    if (!ph.img) return;
+    var r = photoCanvas().getBoundingClientRect();
+    var x = (ev.clientX - r.left - ph.fit.x) / ph.fit.s;
+    var y = (ev.clientY - r.top - ph.fit.y) / ph.fit.s;
+    if (x < 0 || y < 0 || x > ph.w || y > ph.h) return;
+
+    if (ph.step === 'ref') {
+      if (ph.ref.length >= 2) ph.ref = [];
+      ph.ref.push({ x: x, y: y });
+      if (ph.ref.length === 2) {
+        recalcPhoto();
+        setPhotoStep('measure');
+        toast('Escala definida. Agora trace os beirais.');
+      }
+    } else {
+      ph.runs[ph.runs.length - 1].push({ x: x, y: y });
+    }
+    recalcPhoto();
+  });
+
+  function pxLen(a, b) { return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2)); }
+
+  function photoFeet() {
+    if (!ph.scale) return { feet: 0, corners: 0, lines: 0 };
+    var feet = 0, corners = 0, lines = 0;
+    ph.runs.forEach(function (r) {
+      if (r.length < 2) return;
+      lines++;
+      for (var i = 1; i < r.length; i++) feet += pxLen(r[i - 1], r[i]) * ph.scale;
+      corners += r.length - 2;
+    });
+    return { feet: feet, corners: corners, lines: lines };
+  }
+
+  function recalcPhoto() {
+    var rf = Number($('#ref-feet').value) || 0;
+    if (ph.ref.length === 2 && rf > 0) {
+      var px = pxLen(ph.ref[0], ph.ref[1]);
+      ph.scale = px > 0 ? rf / px : 0;
+    }
+    var t = photoFeet();
+    $('#photo-total').textContent = Math.round(t.feet);
+    $('#photo-scale').textContent = ph.scale
+      ? 'escala ok · ' + t.lines + ' linha(s)'
+      : 'sem escala ainda';
+    drawPhoto();
+  }
+
+  function drawPhoto() {
+    var c = photoCanvas();
+    if (!c) return;
+    var st = document.getElementById('photo-stage');
+    var W = st.clientWidth, H = st.clientHeight;
+    var dpr = window.devicePixelRatio || 1;
+    c.width = W * dpr; c.height = H * dpr;
+    var g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (!ph.img) return;
+
+    var s = Math.min(W / ph.w, H / ph.h);
+    var x = (W - ph.w * s) / 2, y = (H - ph.h * s) / 2;
+    ph.fit = { x: x, y: y, s: s };
+    g.drawImage(ph.img, x, y, ph.w * s, ph.h * s);
+
+    function P(p) { return [x + p.x * s, y + p.y * s]; }
+
+    // referência em ciano
+    if (ph.ref.length) {
+      g.strokeStyle = '#2BE0C0'; g.lineWidth = 3; g.beginPath();
+      ph.ref.forEach(function (p, i) {
+        var q = P(p);
+        i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+      });
+      g.stroke();
+      ph.ref.forEach(function (p) {
+        var q = P(p);
+        g.fillStyle = '#2BE0C0'; g.beginPath(); g.arc(q[0], q[1], 7, 0, 6.284); g.fill();
+        g.strokeStyle = '#0E1317'; g.lineWidth = 2; g.stroke();
+      });
+    }
+
+    // beirais em amarelo, com a medida de cada trecho
+    ph.runs.forEach(function (r) {
+      if (r.length > 1) {
+        g.strokeStyle = '#FFC91B'; g.lineWidth = 4; g.beginPath();
+        r.forEach(function (p, i) {
+          var q = P(p);
+          i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+        });
+        g.stroke();
+        if (ph.scale) {
+          g.font = '600 13px "IBM Plex Mono", monospace';
+          for (var i = 1; i < r.length; i++) {
+            var a = P(r[i - 1]), b = P(r[i]);
+            var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+            var txt = Math.round(pxLen(r[i - 1], r[i]) * ph.scale) + ' ft';
+            var w = g.measureText(txt).width + 10;
+            g.fillStyle = 'rgba(14,19,23,.88)';
+            g.fillRect(mx - w / 2, my - 10, w, 20);
+            g.fillStyle = '#FFC91B';
+            g.fillText(txt, mx - w / 2 + 5, my + 5);
+          }
+        }
+      }
+      r.forEach(function (p) {
+        var q = P(p);
+        g.fillStyle = '#FFC91B'; g.beginPath(); g.arc(q[0], q[1], 6, 0, 6.284); g.fill();
+        g.strokeStyle = '#0E1317'; g.lineWidth = 2; g.stroke();
+      });
+    });
+  }
+
+  $('#btn-photo-undo').addEventListener('click', function () {
+    if (ph.step === 'ref') { ph.ref.pop(); }
+    else {
+      var last = ph.runs[ph.runs.length - 1];
+      last.pop();
+      if (!last.length && ph.runs.length > 1) ph.runs.pop();
+    }
+    recalcPhoto();
+  });
+
+  $('#btn-photo-newline').addEventListener('click', function () {
+    if (ph.step !== 'measure') { toast('Termine a referência primeiro.'); return; }
+    if (!ph.runs[ph.runs.length - 1].length) { toast('A linha atual está vazia.'); return; }
+    ph.runs.push([]);
+    toast('Linha nova na foto.');
+  });
+
+  $('#btn-photo-add').addEventListener('click', function () {
+    var t = photoFeet();
+    if (t.feet < 1) { toast('Trace pelo menos uma linha com escala definida.'); return; }
+    job.manual = job.manual || [];
+    job.manual.push({
+      feet: Math.round(t.feet), corners: t.corners, level: ph.level, note: 'medido na foto'
+    });
+    ph.runs = [[]];
+    recalcPhoto();
+    toast(Math.round(t.feet) + ' ft somados ao orçamento.');
+    go('map');
+    setTimeout(function () { if (map) { map.invalidateSize(); updateTape(); } }, 60);
+  });
+
+  window.addEventListener('resize', function () { if (ph.img) drawPhoto(); });
+
   /* ---------- materiais ---------- */
   function currentList() {
-    var m = Calc.measure(job.runs, settings.calibration);
+    var m = Calc.measure(job.runs, settings.calibration, job.manual);
     var cfg = Object.assign({}, settings, { size: job.size, stories: job.stories });
     var list = Calc.materials(m, cfg);
     list.forEach(function (i) {
@@ -619,6 +844,7 @@
       if (lv[k]) parts.push(levelName(k) + ' ' + Math.round(lv[k]) + ' ft');
     });
     var el = $('#mat-levels');
+    if (d.m.manualFeet) parts.push(Math.round(d.m.manualFeet) + ' ft medidos na foto');
     if (el) el.textContent = parts.length > 1 ? parts.join(' · ') : '';
     $('#mat-stories').value = job.stories;
     $('#mat-color').value = job.color || '';

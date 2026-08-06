@@ -24,7 +24,7 @@
 
   /* ---- medição ---------------------------------------------------- */
   // runs = [{ points:[{lat,lng},...] }]
-  function measure(runs, calibration) {
+  function measure(runs, calibration, manual) {
     var cal = calibration || 1;
     var total = 0, segments = 0, corners = 0, live = 0, ends = 0;
     var byLevel = {}, runsByLevel = {};
@@ -48,8 +48,23 @@
         ends += 2;                 // só linha aberta leva end cap
       }
     });
+    // trechos medidos fora do mapa (foto de fachada, trena em campo)
+    var manualFeet = 0;
+    (manual || []).forEach(function (e) {
+      var f = Number(e.feet) || 0;
+      if (f <= 0) return;
+      var lv = String(e.level || 1);
+      manualFeet += f;
+      live++;
+      ends += 2;
+      corners += Number(e.corners) || 0;
+      byLevel[lv] = (byLevel[lv] || 0) + f;
+      runsByLevel[lv] = (runsByLevel[lv] || 0) + 1;
+    });
+
     return {
-      feet: total * cal,
+      feet: total * cal + manualFeet,
+      manualFeet: manualFeet,
       segments: segments,
       corners: corners,
       runs: live,
