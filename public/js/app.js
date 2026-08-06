@@ -108,22 +108,108 @@
     return [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
   }
 
+  function landAt(lat, lng, zoom, msg) {
+    map.setView([lat, lng], zoom || 20);
+    job.center = { lat: lat, lng: lng };
+    toast(msg);
+  }
+
+  // tenta vários serviços em ordem; o Census é o melhor para endereço dos EUA
   function geocode() {
+    var c = job.client;
     var q = fullAddress();
-    if (!q) { toast('Sem endereço — arraste o mapa até a casa.'); return; }
+
+    // 1) usuário colou "lat, lng" direto no campo de endereço
+    var m = (c.address || '').match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+    if (m) { landAt(+m[1], +m[2], 21, 'Coordenadas aplicadas.'); return; }
+
+    if (!q) { toast('Sem endereço — use o GPS ou arraste o mapa.'); return; }
     toast('Procurando o imóvel…');
-    fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q))
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d && d[0]) {
-          map.setView([+d[0].lat, +d[0].lon], 20);
-          job.center = { lat: +d[0].lat, lng: +d[0].lon };
-          toast('Imóvel encontrado. Confira antes de medir.');
-        } else {
-          toast('Endereço não encontrado. Arraste o mapa até a casa.');
-        }
-      })
-      .catch(function () { toast('Sem internet para buscar. Posicione o mapa na mão.'); });
+
+    tryCensus(c)
+      .catch(function () { return tryNominatimStructured(c); })
+      .catch(function () { return tryNominatimFree(q); })
+      .catch(function () { return tryPhoton(q); })
+      .catch(function () { return tryZip(c); })
+      .then(function (r) { landAt(r.lat, r.lng, r.zoom || 20, r.msg); })
+      .catch(function () {
+        toast('Não achei este endereço. Use o GPS (⌖) ou arraste o mapa até a casa.');
+      });
+  }
+
+  function jget(url) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw 0;
+      return r.json();
+    });
+  }
+
+  // US Census — gratuito, sem chave, precisão de telhado
+  function tryCensus(c) {
+    var line = [c.address, c.city, c.state, c.zip].filter(Boolean).join(', ');
+    var u = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress' +
+            '?address=' + encodeURIComponent(line) +
+            '&benchmark=Public_AR_Current&format=json';
+    return jget(u).then(function (d) {
+      var m = d && d.result && d.result.addressMatches;
+      if (!m || !m.length) throw 0;
+      return { lat: m[0].coordinates.y, lng: m[0].coordinates.x, zoom: 21, msg: 'Imóvel encontrado. Confira antes de medir.' };
+    });
+  }
+
+  function tryNominatimStructured(c) {
+    var u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us' +
+            '&street=' + encodeURIComponent(c.address || '') +
+            '&city=' + encodeURIComponent(c.city || '') +
+            '&state=' + encodeURIComponent(c.state || '') +
+            '&postalcode=' + encodeURIComponent(c.zip || '');
+    return jget(u).then(function (d) {
+      if (!d || !d[0]) throw 0;
+      return { lat: +d[0].lat, lng: +d[0].lon, zoom: 20, msg: 'Imóvel encontrado. Confira antes de medir.' };
+    });
+  }
+
+  function tryNominatimFree(q) {
+    var u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q + ', USA');
+    return jget(u).then(function (d) {
+      if (!d || !d[0]) throw 0;
+      return { lat: +d[0].lat, lng: +d[0].lon, zoom: 20, msg: 'Imóvel encontrado. Confira antes de medir.' };
+    });
+  }
+
+  function tryPhoton(q) {
+    var u = 'https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(q);
+    return jget(u).then(function (d) {
+      var f = d && d.features && d.features[0];
+      if (!f) throw 0;
+      return { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], zoom: 20, msg: 'Imóvel encontrado. Confira antes de medir.' };
+    });
+  }
+
+  // último recurso: centraliza no CEP ou na cidade
+  function tryZip(c) {
+    var q = c.zip ? (c.zip + ', USA') : [c.city, c.state, 'USA'].filter(Boolean).join(', ');
+    if (!c.zip && !c.city) return Promise.reject();
+    var u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q);
+    return jget(u).then(function (d) {
+      if (!d || !d[0]) throw 0;
+      return { lat: +d[0].lat, lng: +d[0].lon, zoom: 16, msg: 'Achei só a região. Arraste o mapa até a casa.' };
+    });
+  }
+
+  // GPS — o vendedor já está na frente do imóvel
+  function useGps() {
+    if (!navigator.geolocation) { toast('Este aparelho não tem GPS disponível.'); return; }
+    toast('Pegando sua posição…');
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        landAt(pos.coords.latitude, pos.coords.longitude, 21, 'Posição do GPS. Ajuste o mapa sobre o telhado.');
+      },
+      function (err) {
+        toast(err.code === 1 ? 'Permissão de localização negada.' : 'GPS não respondeu. Arraste o mapa.');
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
   }
 
   /* ---------- mapa e desenho ---------- */
@@ -301,7 +387,8 @@
     renderDraw(); select(null, true);
     toast('Linha apagada.');
   });
-  $('#btn-relocate').addEventListener('click', geocode);
+  $('#btn-relocate').addEventListener('click', useGps);
+  $('#btn-find').addEventListener('click', geocode);
   $('#btn-to-materials').addEventListener('click', function () {
     var m = Calc.measure(job.runs, settings.calibration);
     if (m.feet < 1) { toast('Desenhe pelo menos uma linha sobre o beiral.'); return; }
