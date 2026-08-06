@@ -709,8 +709,101 @@
     scale: 0,                       // pés por pixel
     level: 1,
     view: { z: 1, ox: 0, oy: 0 },   // zoom e deslocamento da foto na tela
-    drag: null                      // ponto sendo arrastado
+    drag: null,                     // ponto sendo arrastado
+    edge: null,                     // mapa de bordas (Sobel) da imagem
+    edgeCanvas: null,               // desenho das bordas para sobrepor
+    snap: true,                     // encaixar o ponto na borda mais forte
+    showEdges: false
   };
+
+  /* --- detecção de bordas: Sobel numa cópia reduzida da foto ---
+     Não é reconhecimento de objeto. É matemática de contraste: onde a cor muda
+     bruscamente, há uma aresta. Serve para o ponto grudar na linha do telhado
+     em vez de ficar 3 px torto. */
+  function buildEdges(img) {
+    var MAX = 900;
+    var sc = Math.min(1, MAX / img.naturalWidth);
+    var w = Math.max(1, Math.round(img.naturalWidth * sc));
+    var h = Math.max(1, Math.round(img.naturalHeight * sc));
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    var g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    var src;
+    try { src = g.getImageData(0, 0, w, h).data; } catch (e) { ph.edge = null; return; }
+
+    var gray = new Float32Array(w * h);
+    for (var i = 0, j = 0; i < src.length; i += 4, j++) {
+      gray[j] = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114);
+    }
+    var mag = new Uint8ClampedArray(w * h);
+    var max = 1;
+    for (var y = 1; y < h - 1; y++) {
+      for (var x = 1; x < w - 1; x++) {
+        var o = y * w + x;
+        var gx = -gray[o - w - 1] - 2 * gray[o - 1] - gray[o + w - 1]
+                 + gray[o - w + 1] + 2 * gray[o + 1] + gray[o + w + 1];
+        var gy = -gray[o - w - 1] - 2 * gray[o - w] - gray[o - w + 1]
+                 + gray[o + w - 1] + 2 * gray[o + w] + gray[o + w + 1];
+        var m = Math.sqrt(gx * gx + gy * gy);
+        if (m > max) max = m;
+        mag[o] = m;
+      }
+    }
+    // normaliza
+    var k = 255 / max;
+    for (var p2 = 0; p2 < mag.length; p2++) mag[p2] = mag[p2] * k;
+    ph.edge = { w: w, h: h, mag: mag, sx: w / img.naturalWidth, sy: h / img.naturalHeight };
+
+    // camada visual das bordas — dilatada, senão some quando a foto encolhe na tela
+    var TH = 58;
+    var thick = new Uint8ClampedArray(w * h);
+    for (var yy = 1; yy < h - 1; yy++) {
+      for (var xx = 1; xx < w - 1; xx++) {
+        var oo = yy * w + xx, mx = 0;
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            var vv = mag[oo + dy * w + dx];
+            if (vv > mx) mx = vv;
+          }
+        }
+        thick[oo] = mx;
+      }
+    }
+    var oc = document.createElement('canvas');
+    oc.width = w; oc.height = h;
+    var og = oc.getContext('2d');
+    var id = og.createImageData(w, h);
+    for (var q = 0, r = 0; q < thick.length; q++, r += 4) {
+      var v = thick[q];
+      id.data[r] = 43; id.data[r + 1] = 255; id.data[r + 2] = 214;
+      id.data[r + 3] = v > TH ? 255 : 0;
+    }
+    og.putImageData(id, 0, 0);
+    ph.edgeCanvas = oc;
+  }
+
+  // puxa o ponto para a borda mais forte por perto
+  function snapToEdge(p) {
+    if (!ph.snap || !ph.edge) return p;
+    var R = Math.max(3, Math.round(16 / ph.fit.s * ph.edge.sx));   // ~16 px de tela
+    var cx = Math.round(p.x * ph.edge.sx), cy = Math.round(p.y * ph.edge.sy);
+    var best = null, bv = 80;                                       // limiar mínimo
+    for (var y = cy - R; y <= cy + R; y++) {
+      if (y < 1 || y >= ph.edge.h - 1) continue;
+      for (var x = cx - R; x <= cx + R; x++) {
+        if (x < 1 || x >= ph.edge.w - 1) continue;
+        var v = ph.edge.mag[y * ph.edge.w + x];
+        var dist = Math.hypot(x - cx, y - cy);
+        if (dist > R) continue;
+        var score = v - dist * 2.2;                                  // perto pesa mais
+        if (v > bv && score > (best ? best.s : -1e9)) best = { x: x, y: y, s: score };
+      }
+    }
+    if (!best) return p;
+    return { x: best.x / ph.edge.sx, y: best.y / ph.edge.sy };
+  }
+
 
   function photoCanvas() { return document.getElementById('photo-canvas'); }
 
@@ -735,6 +828,7 @@
         im.onload = function () {
           ph.img = im; ph.w = im.naturalWidth; ph.h = im.naturalHeight;
           ph.view = { z: 1, ox: 0, oy: 0 };
+          buildEdges(im);
           $('#photo-empty').hidden = true;
           setPhotoStep('measure'); recalcPhoto();
         };
@@ -754,8 +848,14 @@
   $('#btn-photo').addEventListener('click', function () { openPhoto(null); });
   $('#btn-pick').addEventListener('click', function () { $('#photo-file').click(); });
   $('#btn-photo-pick2').addEventListener('click', function () { $('#photo-file').click(); });
+  $('#btn-cam').addEventListener('click', function () { $('#photo-cam').click(); });
+  $('#btn-photo-cam2').addEventListener('click', function () { $('#photo-cam').click(); });
 
-  $('#photo-file').addEventListener('change', function (e) {
+  ['#photo-file', '#photo-cam'].forEach(function (sel) {
+    $(sel).addEventListener('change', onPhotoFile);
+  });
+
+  function onPhotoFile(e) {
     var f = e.target.files && e.target.files[0];
     if (!f) return;
     var img = new Image();
@@ -763,6 +863,7 @@
       ph.img = img; ph.w = img.naturalWidth; ph.h = img.naturalHeight;
       ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.step = 'ref';
       ph.view = { z: 1, ox: 0, oy: 0 };
+      buildEdges(img);
       setPhotoStep('ref');
       $('#photo-empty').hidden = true;
       drawPhoto();
@@ -770,7 +871,8 @@
     };
     img.onerror = function () { toast('Não consegui abrir essa imagem.'); };
     img.src = URL.createObjectURL(f);
-  });
+    e.target.value = '';
+  }
 
   function setPhotoStep(s) {
     ph.step = s;
@@ -889,6 +991,7 @@
         var p = toImg(e.clientX, e.clientY);
         p.x = Math.max(0, Math.min(ph.w, p.x));
         p.y = Math.max(0, Math.min(ph.h, p.y));
+        p = snapToEdge(p);
         if (ph.drag.kind === 'ref') ph.ref[ph.drag.i] = p;
         else ph.runs[ph.drag.ri][ph.drag.pi] = p;
         recalcPhoto();
@@ -920,6 +1023,7 @@
     function addPhotoPoint(cx, cy) {
       var p = toImg(cx, cy);
       if (p.x < 0 || p.y < 0 || p.x > ph.w || p.y > ph.h) return;
+      p = snapToEdge(p);
       if (ph.step === 'ref') {
         if (ph.ref.length >= 2) ph.ref = [];
         ph.ref.push(p);
@@ -1034,6 +1138,11 @@
     ph.fit = { x: x, y: y, s: S, base: base };
     g.imageSmoothingEnabled = ph.view.z < 3;   // no zoom alto, pixel cru ajuda a mirar
     g.drawImage(ph.img, x, y, ph.w * S, ph.h * S);
+    if (ph.showEdges && ph.edgeCanvas) {
+      g.globalAlpha = 0.9;
+      g.drawImage(ph.edgeCanvas, x, y, ph.w * S, ph.h * S);
+      g.globalAlpha = 1;
+    }
 
     function P(p) { return [x + p.x * S, y + p.y * S]; }
 
@@ -1086,6 +1195,17 @@
   $('#btn-zin').addEventListener('click', function () { zoomPhoto(1.6); });
   $('#btn-zout').addEventListener('click', function () { zoomPhoto(1 / 1.6); });
   $('#btn-zfit').addEventListener('click', resetPhotoView);
+  $('#btn-snap').addEventListener('click', function () {
+    ph.snap = !ph.snap;
+    $('#btn-snap').classList.toggle('is-on', ph.snap);
+    toast(ph.snap ? 'Encaixe na borda ligado.' : 'Encaixe desligado — ponto vai onde você tocar.');
+  });
+  $('#btn-edges').addEventListener('click', function () {
+    ph.showEdges = !ph.showEdges;
+    $('#btn-edges').classList.toggle('is-on', ph.showEdges);
+    drawPhoto();
+    if (ph.showEdges && !ph.edgeCanvas) toast('Bordas não disponíveis para esta imagem.');
+  });
 
   $('#btn-photo-undo').addEventListener('click', function () {
     if (ph.step === 'ref') { ph.ref.pop(); }
