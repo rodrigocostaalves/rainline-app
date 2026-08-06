@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.9</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.11</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -133,6 +133,7 @@
       </div>
       <div class="rail-group" id="tools-draw">
         <button class="rail-btn rail-go" id="btn-detect">Detectar telhado</button>
+        <button class="rail-btn" id="btn-parts">Medições <span class="parts-badge" id="parts-count">0</span></button>
         <button class="rail-btn" id="btn-undo">Desfazer</button>
         <button class="rail-btn" id="btn-newline">Nova linha</button>
         <button class="rail-btn rail-photo" id="btn-photo">Medir na foto</button>
@@ -153,6 +154,7 @@
         <button class="rail-btn rail-danger" id="btn-del-line">Apagar linha</button>
       </div>
     </div>
+    <div class="rail-hint">⌄</div>
   </div>
 
   <!-- SIGNATURE: leitura em fita métrica -->
@@ -166,6 +168,33 @@
       </div>
     </div>
     <button class="btn btn-primary btn-block" id="btn-to-materials">Calcular materiais</button>
+  </div>
+</section>
+
+<!-- ============ MEDIÇÕES ============ -->
+<section class="screen" id="screen-parts">
+  <header class="topbar">
+    <button class="btn-icon" data-back="map" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Resumo</p><h2 class="topbar-title">Medições</h2></div>
+    <span></span>
+  </header>
+  <div class="pad">
+    <div class="card">
+      <div class="photo-read" style="color:var(--ink);margin:0">
+        <div><b id="parts-total" style="font-size:38px">0</b><small style="color:var(--ink-2)">LINEAR FEET NO TOTAL</small></div>
+      </div>
+      <div id="parts-levels" style="margin-top:10px"></div>
+    </div>
+
+    <h3 class="section-title">Medido no satélite</h3>
+    <div class="card" id="parts-sat"></div>
+
+    <h3 class="section-title">Medido em foto <em>fachadas e partes escondidas</em></h3>
+    <div class="card" id="parts-photo"></div>
+
+    <button class="btn btn-dark btn-block" id="btn-add-photo">Anexar foto e medir</button>
+    <button class="btn btn-ghost btn-block" id="btn-back-map">Voltar ao mapa</button>
+    <button class="btn btn-primary btn-block" id="btn-parts-next">Calcular materiais</button>
   </div>
 </section>
 
@@ -198,6 +227,9 @@
       <button class="ref-chip" data-ref="16">Garagem dupla 16'</button>
       <button class="ref-chip" data-ref="9">Garagem simples 9'</button>
       <button class="ref-chip" data-ref="3">Porta 3'</button>
+      <button class="ref-chip" data-ref="3">Janela simples · larg 3'</button>
+      <button class="ref-chip" data-ref="6">Janela dupla · larg 6'</button>
+      <button class="ref-chip" data-ref="5">Janela · altura 5'</button>
       <input type="number" id="ref-feet" value="16" step="0.5" inputmode="decimal">
       <span style="font-size:12px;color:#8E9AA3">ft</span>
     </div>
@@ -375,7 +407,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.9</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.11</b></p>
   </div>
 </section>
 
