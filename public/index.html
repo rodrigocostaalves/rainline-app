@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.8</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.9</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -124,30 +124,34 @@
     <div class="loupe-tag" id="loupe-tag"></div>
   </div>
 
-  <div class="map-tools">
-    <div class="mode-switch">
-      <button class="mode-btn is-on" data-mapmode="draw">Desenhar</button>
-      <button class="mode-btn" data-mapmode="edit">Ajustar</button>
-    </div>
-    <div class="chips" id="tools-draw">
-      <button class="chip chip-go" id="btn-detect">Detectar telhado</button>
-      <button class="chip" id="btn-undo">Desfazer</button>
-      <button class="chip" id="btn-newline">Nova linha</button>
-      <button class="chip chip-danger" id="btn-clear">Limpar</button>
-      <button class="chip" id="btn-3d">Ver em 3D</button>
-      <button class="chip" id="btn-sv">Street View</button>
-      <button class="chip chip-layer" id="btn-layer">Imagem: Esri</button>
-      <button class="chip" id="btn-enhance">Realçar</button>
-    </div>
-    <div class="chips" id="tools-sel" hidden>
-      <span class="sel-tag" id="sel-label">Toque numa linha</span>
-      <button class="chip" id="btn-continue">Continuar</button>
-      <button class="chip chip-danger" id="btn-del-line">Apagar linha</button>
-      <span class="lv-group" id="lv-group">
-        <button class="lv-btn is-on" data-level="1">Térreo</button>
-        <button class="lv-btn" data-level="2">2º andar</button>
-        <button class="lv-btn" data-level="3">3º</button>
-      </span>
+  <div class="map-rail" id="map-rail">
+    <button class="rail-toggle" id="rail-toggle" aria-label="Mostrar/ocultar ferramentas">›</button>
+    <div class="rail-body" id="rail-body">
+      <div class="mode-switch">
+        <button class="mode-btn is-on" data-mapmode="draw">Desenhar</button>
+        <button class="mode-btn" data-mapmode="edit">Ajustar</button>
+      </div>
+      <div class="rail-group" id="tools-draw">
+        <button class="rail-btn rail-go" id="btn-detect">Detectar telhado</button>
+        <button class="rail-btn" id="btn-undo">Desfazer</button>
+        <button class="rail-btn" id="btn-newline">Nova linha</button>
+        <button class="rail-btn rail-photo" id="btn-photo">Medir na foto</button>
+        <button class="rail-btn" id="btn-3d">Ver em 3D</button>
+        <button class="rail-btn" id="btn-sv">Street View</button>
+        <button class="rail-btn" id="btn-layer">Imagem: Esri</button>
+        <button class="rail-btn" id="btn-enhance">Realçar</button>
+        <button class="rail-btn rail-danger" id="btn-clear">Limpar</button>
+      </div>
+      <div class="rail-group" id="tools-sel" hidden>
+        <span class="sel-tag" id="sel-label">Toque numa linha</span>
+        <button class="rail-btn" id="btn-continue">Continuar</button>
+        <span class="lv-group" id="lv-group">
+          <button class="lv-btn is-on" data-level="1">Térreo</button>
+          <button class="lv-btn" data-level="2">2º</button>
+          <button class="lv-btn" data-level="3">3º</button>
+        </span>
+        <button class="rail-btn rail-danger" id="btn-del-line">Apagar linha</button>
+      </div>
     </div>
   </div>
 
@@ -162,6 +166,59 @@
       </div>
     </div>
     <button class="btn btn-primary btn-block" id="btn-to-materials">Calcular materiais</button>
+  </div>
+</section>
+
+<!-- ============ MEDIR NA FOTO ============ -->
+<section class="screen" id="screen-photo">
+  <header class="topbar">
+    <button class="btn-icon" data-back="map" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Fachada</p><h2 class="topbar-title">Medir na foto</h2></div>
+    <span></span>
+  </header>
+
+  <div class="photo-stage" id="photo-stage">
+    <canvas id="photo-canvas"></canvas>
+    <div class="photo-empty" id="photo-empty">
+      <p>Tire um print do Street View (ou uma foto da fachada) e carregue aqui.<br>
+      Serve para pegar os beirais que o satélite não mostra.</p>
+      <button class="btn btn-primary" id="btn-pick">Escolher imagem</button>
+    </div>
+  </div>
+
+  <input type="file" id="photo-file" accept="image/*" hidden>
+
+  <div class="photo-bar">
+    <div class="photo-steps">
+      <button class="pstep is-on" data-pstep="ref">1 · Referência</button>
+      <button class="pstep" data-pstep="measure">2 · Beirais</button>
+    </div>
+
+    <div class="ref-row" id="ref-row">
+      <button class="ref-chip" data-ref="16">Garagem dupla 16'</button>
+      <button class="ref-chip" data-ref="9">Garagem simples 9'</button>
+      <button class="ref-chip" data-ref="3">Porta 3'</button>
+      <input type="number" id="ref-feet" value="16" step="0.5" inputmode="decimal">
+      <span style="font-size:12px;color:#8E9AA3">ft</span>
+    </div>
+
+    <div class="photo-read">
+      <div><b id="photo-total">0</b><small>LINEAR FEET NA FOTO</small></div>
+      <div class="scale" id="photo-scale">sem escala ainda</div>
+    </div>
+
+    <div class="photo-acts">
+      <button class="btn btn-ghost" id="btn-photo-undo">Desfazer</button>
+      <button class="btn btn-ghost" id="btn-photo-newline">Nova linha</button>
+      <button class="btn btn-primary" id="btn-photo-add">Somar ao orçamento</button>
+    </div>
+    <div class="ref-row" style="margin:10px 0 0">
+      <span style="font-size:12px;color:#8E9AA3">Nível:</span>
+      <button class="ref-chip is-on" data-plevel="1">Térreo</button>
+      <button class="ref-chip" data-plevel="2">2º andar</button>
+      <button class="ref-chip" data-plevel="3">3º</button>
+      <button class="ref-chip" id="btn-photo-pick2">Trocar imagem</button>
+    </div>
   </div>
 </section>
 
@@ -318,7 +375,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.8</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.9</b></p>
   </div>
 </section>
 
