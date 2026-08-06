@@ -1,1 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>RainLine — Orçamento de Calhas</title>
+<meta name="theme-color" content="#101418">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
 
+<!-- ============ LOGIN ============ -->
+<section class="screen is-active" id="screen-login">
+  <div class="login-wrap">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <h1 class="brand-name">RainLine</h1>
+      <p class="brand-sub">Gutter Estimating · Field Kit</p>
+    </div>
+    <form class="card login-card" id="form-login" autocomplete="on">
+      <label class="field">
+        <span>Usuário</span>
+        <input type="text" id="login-user" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>Senha</span>
+        <input type="password" id="login-pass" autocomplete="current-password" required>
+      </label>
+      <button class="btn btn-primary btn-block" type="submit">Entrar</button>
+      <p class="hint" id="login-hint">Primeiro acesso: <b>admin</b> / <b>1234</b> — troque em Configurações.</p>
+    </form>
+  </div>
+</section>
+
+<!-- ============ DASHBOARD ============ -->
+<section class="screen" id="screen-home">
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Bem-vindo</p>
+      <h2 class="topbar-title" id="home-user">Vendedor</h2>
+    </div>
+    <button class="btn-icon" data-action="logout" aria-label="Sair"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></button>
+  </header>
+  <div class="pad">
+    <div class="stat-strip">
+      <div class="stat"><b id="stat-month">0</b><span>Orçamentos no mês</span></div>
+      <div class="stat"><b id="stat-value">$0</b><span>Valor no mês</span></div>
+    </div>
+    <div class="menu-grid">
+      <button class="tile tile-primary" data-go="job">
+        <svg viewBox="0 0 24 24"><path d="M3 20l4-1 12-12a2.1 2.1 0 0 0-3-3L4 16l-1 4z"/><path d="M14 5l3 3"/></svg>
+        <span>
+          <span class="tile-label">Novo orçamento</span>
+          <span class="tile-desc">Endereço → medir no satélite → fechar</span>
+        </span>
+      </button>
+      <button class="tile" data-go="clients">
+        <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg>
+        <span class="tile-label">Clientes</span>
+      </button>
+      <button class="tile" data-go="history">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span class="tile-label">Histórico</span>
+      </button>
+      <button class="tile" data-go="settings">
+        <svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+        <span class="tile-label">Configurações</span>
+      </button>
+      <button class="tile tile-demo" id="btn-demo">
+        <svg viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></svg>
+        <span class="tile-label">Ver exemplo pronto (casa medida)</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ NOVO ORÇAMENTO ============ -->
+<section class="screen" id="screen-job">
+  <header class="topbar">
+    <button class="btn-icon" data-back="home" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Passo 1 de 4</p><h2 class="topbar-title">Cliente</h2></div>
+    <span></span>
+  </header>
+  <div class="pad">
+    <form class="card" id="form-job">
+      <label class="field"><span>Nome do cliente</span><input type="text" id="job-name" required></label>
+      <label class="field"><span>Telefone</span><input type="tel" id="job-phone" inputmode="tel"></label>
+      <label class="field"><span>E-mail</span><input type="email" id="job-email"></label>
+      <label class="field"><span>Endereço</span><input type="text" id="job-address" placeholder="123 Main St"></label>
+      <div class="row-3">
+        <label class="field"><span>Cidade</span><input type="text" id="job-city"></label>
+        <label class="field"><span>Estado</span><input type="text" id="job-state" maxlength="2" placeholder="FL"></label>
+        <label class="field"><span>ZIP</span><input type="text" id="job-zip" inputmode="numeric"></label>
+      </div>
+      <label class="field"><span>Observações</span><textarea id="job-notes" rows="2"></textarea></label>
+      <button class="btn btn-primary btn-block" type="submit">Buscar imóvel</button>
+      <p class="hint">Sem internet? Toque em <b>Buscar imóvel</b> mesmo assim e posicione o pino na mão.</p>
+    </form>
+  </div>
+</section>
+
+<!-- ============ MAPA / MEDIÇÃO ============ -->
+<section class="screen screen-map" id="screen-map">
+  <header class="topbar topbar-float">
+    <button class="btn-icon" data-back="job" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Passo 2 de 4</p><h2 class="topbar-title" id="map-title">Medir calhas</h2></div>
+    <button class="btn-icon" id="btn-relocate" aria-label="Buscar endereço"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+  </header>
+
+  <div id="map"></div>
+
+  <div class="map-tools">
+    <button class="chip" id="btn-undo">Desfazer</button>
+    <button class="chip" id="btn-newline">Nova linha</button>
+    <button class="chip chip-danger" id="btn-clear">Limpar</button>
+  </div>
+
+  <!-- SIGNATURE: leitura em fita métrica -->
+  <div class="tape" id="tape">
+    <div class="tape-ticks" aria-hidden="true"></div>
+    <div class="tape-read">
+      <div class="tape-main"><b id="read-feet">0</b><span>LINEAR FEET</span></div>
+      <div class="tape-side">
+        <div><b id="read-runs">0</b><span>linhas</span></div>
+        <div><b id="read-corners">0</b><span>cantos</span></div>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-block" id="btn-to-materials">Calcular materiais</button>
+  </div>
+</section>
+
+<!-- ============ MATERIAIS ============ -->
+<section class="screen" id="screen-materials">
+  <header class="topbar">
+    <button class="btn-icon" data-back="map" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Passo 3 de 4</p><h2 class="topbar-title">Materiais</h2></div>
+    <span></span>
+  </header>
+  <div class="pad">
+    <div class="card">
+      <div class="seg" id="seg-size" role="group" aria-label="Tamanho da calha">
+        <button type="button" class="seg-btn is-on" data-size="5">Calha 5"</button>
+        <button type="button" class="seg-btn" data-size="6">Calha 6"</button>
+      </div>
+      <div class="row-2">
+        <label class="field"><span>Pavimentos</span>
+          <select id="mat-stories"><option value="1">1 andar</option><option value="2">2 andares</option><option value="3">3 andares</option></select>
+        </label>
+        <label class="field"><span>Cor / acabamento</span><input type="text" id="mat-color" placeholder="White"></label>
+      </div>
+      <p class="measure-line">Medido: <b id="mat-feet">0 ft</b> · <span id="mat-corners">0 cantos</span> · <span id="mat-runs">0 linhas</span></p>
+    </div>
+
+    <h3 class="section-title">Lista de material <em>toque para editar</em></h3>
+    <div class="card" id="mat-list"></div>
+    <button class="btn btn-ghost btn-block" id="btn-recalc">Recalcular pelo padrão</button>
+    <button class="btn btn-primary btn-block" id="btn-to-quote">Ver orçamento</button>
+  </div>
+</section>
+
+<!-- ============ ORÇAMENTO ============ -->
+<section class="screen" id="screen-quote">
+  <header class="topbar">
+    <button class="btn-icon" data-back="materials" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Passo 4 de 4</p><h2 class="topbar-title">Orçamento</h2></div>
+    <span></span>
+  </header>
+  <div class="pad">
+    <div class="card" id="quote-box"></div>
+    <div class="row-2">
+      <label class="field"><span>Desconto ($)</span><input type="number" id="quote-discount" value="0" step="1" inputmode="decimal"></label>
+      <label class="field"><span>Imposto (%)</span><input type="number" id="quote-tax" value="0" step="0.1" inputmode="decimal"></label>
+    </div>
+    <div class="total-card">
+      <span>Total</span><b id="quote-total">$0.00</b>
+    </div>
+    <button class="btn btn-primary btn-block" id="btn-save"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>Salvar orçamento</button>
+    <div class="row-2">
+      <button class="btn btn-dark" id="btn-pdf">Gerar PDF</button>
+      <button class="btn btn-dark" id="btn-share">Compartilhar</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLIENTES ============ -->
+<section class="screen" id="screen-clients">
+  <header class="topbar">
+    <button class="btn-icon" data-back="home" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><h2 class="topbar-title">Clientes</h2></div><span></span>
+  </header>
+  <div class="pad"><div id="clients-list" class="list"></div></div>
+</section>
+
+<!-- ============ HISTÓRICO ============ -->
+<section class="screen" id="screen-history">
+  <header class="topbar">
+    <button class="btn-icon" data-back="home" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><h2 class="topbar-title">Histórico</h2></div><span></span>
+  </header>
+  <div class="pad"><div id="history-list" class="list"></div></div>
+</section>
+
+<!-- ============ CONFIGURAÇÕES ============ -->
+<section class="screen" id="screen-settings">
+  <header class="topbar">
+    <button class="btn-icon" data-back="home" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><h2 class="topbar-title">Configurações</h2></div><span></span>
+  </header>
+  <div class="pad">
+    <h3 class="section-title">Empresa</h3>
+    <div class="card">
+      <label class="field"><span>Nome da empresa</span><input type="text" id="set-company"></label>
+      <label class="field"><span>Telefone</span><input type="text" id="set-phone"></label>
+      <label class="field"><span>E-mail</span><input type="text" id="set-email"></label>
+      <label class="field"><span>Licença / CGC #</span><input type="text" id="set-license"></label>
+    </div>
+
+    <h3 class="section-title">Preços de venda</h3>
+    <div class="card">
+      <div class="seg" id="seg-mode">
+        <button type="button" class="seg-btn is-on" data-mode="simple">Preço por pé</button>
+        <button type="button" class="seg-btn" data-mode="detail">Item a item</button>
+      </div>
+      <div id="price-simple">
+        <div class="row-2">
+          <label class="field"><span>Calha 5" instalada ($/ft)</span><input type="number" id="p-lf5" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Calha 6" instalada ($/ft)</span><input type="number" id="p-lf6" step="0.25" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Downspout ($/ft)</span><input type="number" id="p-ds" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Canto / miter ($)</span><input type="number" id="p-miter" step="1" inputmode="decimal"></label>
+        </div>
+        <p class="hint">No modo “preço por pé”, hangers, end caps, parafusos e vedação já estão embutidos no valor do pé.</p>
+      </div>
+      <div id="price-detail" hidden>
+        <div class="row-2">
+          <label class="field"><span>Calha 5" material ($/ft)</span><input type="number" id="d-lf5" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Calha 6" material ($/ft)</span><input type="number" id="d-lf6" step="0.25" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Downspout ($/ft)</span><input type="number" id="d-ds" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Elbow ($)</span><input type="number" id="d-elbow" step="0.25" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Miter ($)</span><input type="number" id="d-miter" step="0.5" inputmode="decimal"></label>
+          <label class="field"><span>End cap ($)</span><input type="number" id="d-cap" step="0.25" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Hanger ($)</span><input type="number" id="d-hanger" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Splash block ($)</span><input type="number" id="d-splash" step="0.5" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Mão de obra ($/ft)</span><input type="number" id="d-labor" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Margem (%)</span><input type="number" id="d-markup" step="1" inputmode="decimal"></label>
+        </div>
+      </div>
+      <label class="field"><span>Valor mínimo do serviço ($)</span><input type="number" id="p-min" step="10" inputmode="decimal"></label>
+    </div>
+
+    <h3 class="section-title">Regras de cálculo</h3>
+    <div class="card">
+      <div class="row-2">
+        <label class="field"><span>Hanger a cada (pol.)</span><input type="number" id="r-hanger" step="2" inputmode="numeric"></label>
+        <label class="field"><span>1 downspout a cada (ft)</span><input type="number" id="r-ds" step="5" inputmode="numeric"></label>
+      </div>
+      <div class="row-2">
+        <label class="field"><span>Perda de material (%)</span><input type="number" id="r-waste" step="1" inputmode="numeric"></label>
+        <label class="field"><span>Fator de calibração</span><input type="number" id="r-cal" step="0.01" inputmode="decimal"></label>
+      </div>
+      <p class="hint">Calibração: meça uma parede conhecida no mapa e ajuste o fator até bater com a trena. Padrão 1.00.</p>
+    </div>
+
+    <h3 class="section-title">Acesso</h3>
+    <div class="card">
+      <div class="row-2">
+        <label class="field"><span>Usuário</span><input type="text" id="set-user"></label>
+        <label class="field"><span>Senha</span><input type="text" id="set-pass"></label>
+      </div>
+      <p class="hint">Login local, guardado só neste aparelho. Não é autenticação de verdade — na v0.2 isso vira conta no servidor.</p>
+    </div>
+
+    <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
+    <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
+  </div>
+</section>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="print-area"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="js/materials.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
