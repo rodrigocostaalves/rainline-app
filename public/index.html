@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.12</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.13</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -211,11 +211,15 @@
     <div class="photo-empty" id="photo-empty">
       <p>Tire um print do Street View (ou uma foto da fachada) e carregue aqui.<br>
       Serve para pegar os beirais que o satélite não mostra.</p>
-      <button class="btn btn-primary" id="btn-pick">Escolher imagem</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <button class="btn btn-primary" id="btn-cam">Tirar foto agora</button>
+        <button class="btn btn-ghost" id="btn-pick">Escolher da galeria</button>
+      </div>
     </div>
   </div>
 
   <input type="file" id="photo-file" accept="image/*" hidden>
+  <input type="file" id="photo-cam" accept="image/*" capture="environment" hidden>
 
   <div class="photo-bar">
     <div class="photo-steps">
@@ -228,6 +232,8 @@
       <span id="photo-zoom">1.0×</span>
       <button id="btn-zin" aria-label="Aproximar">+</button>
       <button id="btn-zfit" class="zfit">Tela cheia</button>
+      <button id="btn-snap" class="zfit is-on">Encaixar</button>
+      <button id="btn-edges" class="zfit">Bordas</button>
       <span class="zoom-tip">ou use dois dedos na foto</span>
     </div>
 
@@ -257,7 +263,8 @@
       <button class="ref-chip is-on" data-plevel="1">Térreo</button>
       <button class="ref-chip" data-plevel="2">2º andar</button>
       <button class="ref-chip" data-plevel="3">3º</button>
-      <button class="ref-chip" id="btn-photo-pick2">Trocar imagem</button>
+      <button class="ref-chip" id="btn-photo-cam2">Nova foto</button>
+      <button class="ref-chip" id="btn-photo-pick2">Galeria</button>
     </div>
   </div>
 </section>
@@ -415,7 +422,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.12</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.13</b></p>
   </div>
 </section>
 
