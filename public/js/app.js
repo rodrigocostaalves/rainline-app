@@ -34,6 +34,7 @@
     window.scrollTo(0, 0);
     if (name === 'home') renderHome();
     if (name === 'map' && map) setTimeout(function () { map.invalidateSize(); }, 60);
+    if (name === 'parts') renderParts();
     if (name === 'materials') renderMaterials();
     if (name === 'quote') renderQuote();
     if (name === 'clients') renderClients();
@@ -287,6 +288,13 @@
     L.control.zoom({ position: 'topright' }).addTo(map);
     drawLayer = L.layerGroup().addTo(map);
     initLoupe();
+    var rail = document.getElementById('map-rail');
+    L.DomEvent.disableClickPropagation(rail);
+    L.DomEvent.disableScrollPropagation(rail);
+    ['touchstart', 'touchmove', 'pointerdown', 'pointermove', 'mousedown'].forEach(function (ev) {
+      rail.addEventListener(ev, function (e) { e.stopPropagation(); }, { passive: true });
+    });
+
     var saved = 0;
     try {
       var id = localStorage.getItem('rainline.layer');
@@ -402,6 +410,7 @@
     }
     $('#read-runs').textContent = m.runs;
     $('#read-corners').textContent = m.corners;
+    refreshPartsBadge();
   }
 
   /* ---------- detectar o telhado ---------- */
@@ -604,6 +613,89 @@
     toast('Exemplo carregado. Arraste os pontos amarelos para ver a medida mudar.');
   });
 
+  /* ---------- medições (resumo por andar) ---------- */
+  function partsCount() {
+    return (job ? job.runs.filter(function (r) { return r.points.length > 1; }).length : 0) +
+           (job && job.manual ? job.manual.length : 0);
+  }
+
+  function refreshPartsBadge() {
+    var el = $('#parts-count');
+    if (el) el.textContent = partsCount();
+  }
+
+  function renderParts() {
+    var m = Calc.measure(job.runs, settings.calibration, job.manual);
+    $('#parts-total').textContent = Math.round(m.feet);
+
+    var lv = m.byLevel || {};
+    $('#parts-levels').innerHTML = ['1', '2', '3'].filter(function (k) { return lv[k]; })
+      .map(function (k) {
+        return '<div class="total-line"><span>' + levelName(k) + '</span><b>' + Math.round(lv[k]) + ' ft</b></div>';
+      }).join('') || '<p class="hint" style="margin:0">Nada medido ainda.</p>';
+
+    // satélite
+    var sat = '';
+    job.runs.forEach(function (r, i) {
+      if (r.points.length < 2) return;
+      var f = Calc.measure([r], settings.calibration).feet;
+      sat += '<div class="part-row"><div class="part-main"><b>Linha ' + (i + 1) + '</b>' +
+        '<small>' + r.points.length + ' pontos no satélite</small>' + lvMini('r', i, r.level) + '</div>' +
+        '<span class="part-ft">' + Math.round(f) + ' ft</span>' +
+        '<button class="mini-x" data-del-run="' + i + '">✕</button></div>';
+    });
+    $('#parts-sat').innerHTML = sat || '<p class="hint" style="margin:0">Nenhuma linha no satélite ainda.</p>';
+
+    // fotos
+    var ph2 = '';
+    (job.manual || []).forEach(function (e, i) {
+      ph2 += '<div class="part-row">' +
+        (e.thumb ? '<img class="thumb" src="' + e.thumb + '" alt="" data-open-photo="' + i + '">' : '') +
+        '<div class="part-main"><b>' + (e.note || 'Foto') + '</b>' +
+        '<small>' + (e.corners || 0) + ' cantos · toque na foto para editar</small>' +
+        lvMini('m', i, e.level) + '</div>' +
+        '<span class="part-ft">' + Math.round(e.feet) + ' ft</span>' +
+        '<button class="mini-x" data-del-man="' + i + '">✕</button></div>';
+    });
+    $('#parts-photo').innerHTML = ph2 || '<p class="hint" style="margin:0">Nenhuma foto medida ainda.</p>';
+    refreshPartsBadge();
+  }
+
+  function lvMini(kind, i, cur) {
+    return '<div class="lv-mini">' + ['1', '2', '3'].map(function (k) {
+      return '<button data-lv="' + kind + ':' + i + ':' + k + '" class="' +
+        (String(cur || 1) === k ? 'is-on' : '') + '">' + levelName(k) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  $('#screen-parts').addEventListener('click', function (e) {
+    var t = e.target;
+    if (t.dataset.delRun != null) {
+      job.runs.splice(+t.dataset.delRun, 1); selected = null;
+      renderDraw(); renderParts(); return;
+    }
+    if (t.dataset.delMan != null) {
+      job.manual.splice(+t.dataset.delMan, 1); renderParts(); updateTape(); return;
+    }
+    if (t.dataset.lv) {
+      var p = t.dataset.lv.split(':');
+      if (p[0] === 'r') job.runs[+p[1]].level = +p[2];
+      else job.manual[+p[1]].level = +p[2];
+      renderDraw(); renderParts(); return;
+    }
+    if (t.dataset.openPhoto != null) { openPhoto(+t.dataset.openPhoto); }
+  });
+
+  $('#btn-parts').addEventListener('click', function () { go('parts'); });
+  $('#btn-back-map').addEventListener('click', function () { go('map'); });
+  $('#btn-add-photo').addEventListener('click', function () { openPhoto(null); });
+  $('#btn-parts-next').addEventListener('click', function () {
+    var m = Calc.measure(job.runs, settings.calibration, job.manual);
+    if (m.feet < 1) { toast('Meça alguma coisa antes.'); return; }
+    job.overrides = {};
+    go('materials');
+  });
+
   /* ---------- medir na foto (fachada / Street View) ----------
      Foto não tem escala. O usuário traça uma referência de tamanho conhecido
      (porta de garagem, porta comum) e o app converte pixel em pé por
@@ -620,12 +712,43 @@
 
   function photoCanvas() { return document.getElementById('photo-canvas'); }
 
-  function openPhoto() {
+  function openPhoto(idx) {
+    ph.editing = (idx == null) ? null : idx;
+    if (idx == null) {
+      ph.img = null; ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.level = 1;
+      try {
+        var last = localStorage.getItem('rainline.ref');
+        if (last) $('#ref-feet').value = last;
+      } catch (e) {}
+      $('#photo-empty').hidden = false;
+      setPhotoStep('ref');
+    } else {
+      var e = job.manual[idx];
+      ph.level = e.level || 1;
+      ph.ref = (e.ref || []).slice();
+      ph.runs = (e.lines && e.lines.length) ? JSON.parse(JSON.stringify(e.lines)) : [[]];
+      $('#ref-feet').value = e.refFeet || 16;
+      if (e.img) {
+        var im = new Image();
+        im.onload = function () {
+          ph.img = im; ph.w = im.naturalWidth; ph.h = im.naturalHeight;
+          $('#photo-empty').hidden = true;
+          setPhotoStep('measure'); recalcPhoto();
+        };
+        im.src = e.img;
+      } else {
+        $('#photo-empty').hidden = false;
+        toast('A foto original não coube na memória do aparelho. Anexe de novo para editar.');
+      }
+    }
+    $$('[data-plevel]').forEach(function (o) {
+      o.classList.toggle('is-on', +o.dataset.plevel === ph.level);
+    });
     go('photo');
-    setTimeout(drawPhoto, 60);
+    setTimeout(function () { recalcPhoto(); }, 80);
   }
 
-  $('#btn-photo').addEventListener('click', openPhoto);
+  $('#btn-photo').addEventListener('click', function () { openPhoto(null); });
   $('#btn-pick').addEventListener('click', function () { $('#photo-file').click(); });
   $('#btn-photo-pick2').addEventListener('click', function () { $('#photo-file').click(); });
 
@@ -662,6 +785,7 @@
       $$('[data-ref]').forEach(function (o) { o.classList.remove('is-on'); });
       b.classList.add('is-on');
       $('#ref-feet').value = b.dataset.ref;
+      try { localStorage.setItem('rainline.ref', b.dataset.ref); } catch (e) {}
       recalcPhoto();
     });
   });
@@ -807,18 +931,35 @@
     toast('Linha nova na foto.');
   });
 
+  function shrink(img, maxW, q) {
+    var s = Math.min(1, maxW / img.naturalWidth);
+    var c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * s);
+    c.height = Math.round(img.naturalHeight * s);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    try { return c.toDataURL('image/jpeg', q); } catch (e) { return ''; }
+  }
+
   $('#btn-photo-add').addEventListener('click', function () {
     var t = photoFeet();
     if (t.feet < 1) { toast('Trace pelo menos uma linha com escala definida.'); return; }
     job.manual = job.manual || [];
-    job.manual.push({
-      feet: Math.round(t.feet), corners: t.corners, level: ph.level, note: 'medido na foto'
-    });
-    ph.runs = [[]];
-    recalcPhoto();
-    toast(Math.round(t.feet) + ' ft somados ao orçamento.');
-    go('map');
-    setTimeout(function () { if (map) { map.invalidateSize(); updateTape(); } }, 60);
+    var entry = {
+      feet: Math.round(t.feet),
+      corners: t.corners,
+      level: ph.level,
+      note: 'Foto ' + (levelName(ph.level)),
+      refFeet: Number($('#ref-feet').value) || 16,
+      ref: ph.ref.slice(),
+      lines: JSON.parse(JSON.stringify(ph.runs)),
+      thumb: shrink(ph.img, 220, 0.6),
+      img: shrink(ph.img, 1280, 0.72)
+    };
+    if (ph.editing != null) job.manual[ph.editing] = entry;
+    else job.manual.push(entry);
+    toast(Math.round(t.feet) + ' ft somados.');
+    go('parts');
+    renderParts();
   });
 
   window.addEventListener('resize', function () { if (ph.img) drawPhoto(); });
@@ -910,8 +1051,18 @@
     var copy = JSON.parse(JSON.stringify(job));
     delete copy._price; delete copy._list; delete copy._m;
     if (i >= 0) jobs[i] = copy; else jobs.unshift(copy);
-    save(K.jobs, jobs);
-    toast('Orçamento ' + job.id + ' salvo.');
+    try {
+      localStorage.setItem(K.jobs, JSON.stringify(jobs));
+      toast('Orçamento ' + job.id + ' salvo.');
+    } catch (err) {
+      (copy.manual || []).forEach(function (e) { delete e.img; });   // mantém só a miniatura
+      try {
+        localStorage.setItem(K.jobs, JSON.stringify(jobs));
+        toast('Salvo. As fotos em tamanho grande não couberam na memória.');
+      } catch (e2) {
+        toast('Sem espaço no aparelho. Exporte e apague orçamentos antigos.');
+      }
+    }
   });
 
   /* ---------- PDF / compartilhar ---------- */
