@@ -1,0 +1,148 @@
+/* RainLine — motor de cálculo de materiais e preços
+   Todas as regras ficam aqui. Mexeu na regra, mexe só neste arquivo. */
+(function (global) {
+  'use strict';
+
+  var DEFAULTS = {
+    company: '', phone: '', email: '', license: '',
+    user: 'admin', pass: '1234',
+    mode: 'simple',
+    // preço por pé (venda instalada)
+    lf5: 9.00, lf6: 12.00, dsFt: 9.00, miter: 25.00, minJob: 350,
+    // item a item (custo + mão de obra + margem)
+    d_lf5: 2.20, d_lf6: 3.10, d_ds: 2.40, d_elbow: 4.50,
+    d_miter: 12.00, d_cap: 3.50, d_hanger: 3.20, d_splash: 8.00,
+    d_labor: 3.50, d_markup: 45,
+    // regras
+    hangerSpacingIn: 24,   // Flórida: 24" por causa de vento/chuva forte
+    dsEveryFt: 35,         // 1 descida a cada ~35 ft de calha
+    wastePct: 10,
+    calibration: 1.00
+  };
+
+  var FT_PER_STORY = { 1: 12, 2: 22, 3: 32 };
+
+  /* ---- medição ---------------------------------------------------- */
+  // runs = [{ points:[{lat,lng},...] }]
+  function measure(runs, calibration) {
+    var cal = calibration || 1;
+    var total = 0, segments = 0, corners = 0, live = 0;
+    runs.forEach(function (r) {
+      var p = r.points || [];
+      if (p.length < 2) return;
+      live++;
+      for (var i = 1; i < p.length; i++) {
+        total += haversineFt(p[i - 1], p[i]);
+        segments++;
+      }
+      corners += p.length - 2;
+    });
+    return {
+      feet: total * cal,
+      segments: segments,
+      corners: corners,
+      runs: live,
+      ends: live * 2
+    };
+  }
+
+  function haversineFt(a, b) {
+    var R = 20902231; // raio da Terra em pés
+    var dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+  }
+  function rad(d) { return d * Math.PI / 180; }
+
+  /* ---- lista de materiais ----------------------------------------- */
+  function materials(m, cfg) {
+    var s = Object.assign({}, DEFAULTS, cfg || {});
+    var feet = Math.max(0, m.feet);
+    var stories = String(s.stories || 1);
+    var dsLen = FT_PER_STORY[stories] || 12;
+
+    var gutterFt = Math.ceil(feet * (1 + s.wastePct / 100));
+    var dsCount = feet > 0 ? Math.max(m.runs || 1, Math.ceil(feet / s.dsEveryFt)) : 0;
+    var dsFt = dsCount * dsLen;
+    var hangers = Math.ceil(feet / (s.hangerSpacingIn / 12));
+
+    return [
+      { key: 'gutter', name: (s.size || 5) + '" Seamless Gutter', note: 'inclui ' + s.wastePct + '% de perda', qty: gutterFt, unit: 'ft' },
+      { key: 'miters', name: 'Miters / Corners', note: 'cantos medidos no mapa', qty: m.corners, unit: 'ea' },
+      { key: 'caps', name: 'End Caps', note: '2 por linha de calha', qty: m.ends, unit: 'ea' },
+      { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + s.hangerSpacingIn + '"', qty: hangers, unit: 'ea' },
+      { key: 'dsCount', name: 'Downspouts', note: '1 a cada ' + s.dsEveryFt + ' ft', qty: dsCount, unit: 'ea' },
+      { key: 'dsFt', name: 'Downspout (comprimento)', note: dsLen + ' ft por descida', qty: dsFt, unit: 'ft' },
+      { key: 'elbows', name: 'Elbows', note: '3 por descida (2 em cima, 1 embaixo)', qty: dsCount * 3, unit: 'ea' },
+      { key: 'straps', name: 'Downspout Straps', note: '2 por andar', qty: dsCount * (stories === '1' ? 2 : stories === '2' ? 4 : 6), unit: 'ea' },
+      { key: 'splash', name: 'Splash Blocks', note: '1 por descida', qty: dsCount, unit: 'ea' },
+      { key: 'screws', name: 'Parafusos', note: '1 por hanger + folga', qty: Math.ceil(hangers * 1.1), unit: 'ea' },
+      { key: 'sealant', name: 'Vedação (tubos)', note: 'cantos + end caps', qty: Math.max(feet > 0 ? 1 : 0, Math.ceil((m.corners + m.ends) / 8)), unit: 'ea' }
+    ];
+  }
+
+  function qty(list, key) {
+    var f = list.filter(function (i) { return i.key === key; })[0];
+    return f ? Number(f.qty) || 0 : 0;
+  }
+
+  /* ---- preço ------------------------------------------------------- */
+  function price(list, cfg) {
+    var s = Object.assign({}, DEFAULTS, cfg || {});
+    var size = String(s.size || 5);
+    var lines = [], subtotal = 0;
+
+    function add(name, q, unitPrice, unitLabel) {
+      if (!q) return;
+      var t = q * unitPrice;
+      lines.push({ name: name, qty: q, unit: unitLabel || 'ea', unitPrice: unitPrice, total: t });
+      subtotal += t;
+    }
+
+    var gutterFt = qty(list, 'gutter');
+
+    if (s.mode === 'detail') {
+      add(size + '" Seamless Gutter', gutterFt, size === '6' ? s.d_lf6 : s.d_lf5, 'ft');
+      add('Miters / Corners', qty(list, 'miters'), s.d_miter);
+      add('End Caps', qty(list, 'caps'), s.d_cap);
+      add('Hidden Hangers', qty(list, 'hangers'), s.d_hanger);
+      add('Downspout', qty(list, 'dsFt'), s.d_ds, 'ft');
+      add('Elbows', qty(list, 'elbows'), s.d_elbow);
+      add('Splash Blocks', qty(list, 'splash'), s.d_splash);
+      add('Instalação', gutterFt, s.d_labor, 'ft');
+      var markup = subtotal * (s.d_markup / 100);
+      if (markup > 0) { lines.push({ name: 'Margem (' + s.d_markup + '%)', qty: 1, unit: '', unitPrice: markup, total: markup }); subtotal += markup; }
+    } else {
+      add(size + '" Seamless Gutter installed', gutterFt, size === '6' ? s.lf6 : s.lf5, 'ft');
+      add('Downspouts installed', qty(list, 'dsFt'), s.dsFt, 'ft');
+      add('Miters / Corners', qty(list, 'miters'), s.miter);
+    }
+
+    var minApplied = false;
+    if (subtotal > 0 && subtotal < s.minJob) { subtotal = s.minJob; minApplied = true; }
+
+    var discount = Number(s.discount) || 0;
+    var afterDisc = Math.max(0, subtotal - discount);
+    var tax = afterDisc * ((Number(s.taxPct) || 0) / 100);
+
+    return {
+      lines: lines,
+      subtotal: subtotal,
+      minApplied: minApplied,
+      discount: discount,
+      tax: tax,
+      total: afterDisc + tax
+    };
+  }
+
+  global.Calc = {
+    DEFAULTS: DEFAULTS,
+    measure: measure,
+    materials: materials,
+    price: price,
+    qty: qty,
+    haversineFt: haversineFt
+  };
+})(window);
