@@ -94,7 +94,7 @@
       <label class="field"><span>Nome do cliente</span><input type="text" id="job-name" required></label>
       <label class="field"><span>Telefone</span><input type="tel" id="job-phone" inputmode="tel"></label>
       <label class="field"><span>E-mail</span><input type="email" id="job-email"></label>
-      <label class="field"><span>Endereço</span><input type="text" id="job-address" placeholder="123 Main St"></label>
+      <label class="field"><span>Endereço</span><input type="text" id="job-address" placeholder="123 Main St — ou cole lat, lng"></label>
       <div class="row-3">
         <label class="field"><span>Cidade</span><input type="text" id="job-city"></label>
         <label class="field"><span>Estado</span><input type="text" id="job-state" maxlength="2" placeholder="FL"></label>
@@ -102,7 +102,7 @@
       </div>
       <label class="field"><span>Observações</span><textarea id="job-notes" rows="2"></textarea></label>
       <button class="btn btn-primary btn-block" type="submit">Buscar imóvel</button>
-      <p class="hint">Sem internet? Toque em <b>Buscar imóvel</b> mesmo assim e posicione o pino na mão.</p>
+      <p class="hint">Se o endereço não for encontrado, use o <b>GPS</b> na tela do mapa — você já está na frente da casa. Também dá pra colar <b>lat, lng</b> no campo de endereço.</p>
     </form>
   </div>
 </section>
@@ -112,7 +112,7 @@
   <header class="topbar topbar-float">
     <button class="btn-icon" data-back="job" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div><p class="eyebrow">Passo 2 de 4</p><h2 class="topbar-title" id="map-title">Medir calhas</h2></div>
-    <button class="btn-icon" id="btn-relocate" aria-label="Buscar endereço"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+    <div style="display:flex;gap:8px"><button class="btn-icon" id="btn-find" aria-label="Buscar endereço"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button><button class="btn-icon" id="btn-relocate" aria-label="Usar GPS"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button></div>
   </header>
 
   <div id="map"></div>

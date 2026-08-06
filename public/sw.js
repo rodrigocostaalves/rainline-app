@@ -1,5 +1,5 @@
 /* RainLine service worker — cache do app shell (tiles do mapa nunca são cacheados) */
-const CACHE = 'rainline-v0.3.0';
+const CACHE = 'rainline-v0.4.0';
 const SHELL = [
   './', './index.html', './css/app.css', './js/app.js', './js/materials.js',
   './manifest.json', './icons/icon-192.png', './icons/icon-512.png'

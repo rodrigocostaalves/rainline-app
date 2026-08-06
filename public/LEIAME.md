@@ -1,4 +1,4 @@
-# RainLine — v0.3
+# RainLine — v0.4
 
 App de orçamento de calhas (gutters) para uso em campo. PWA, roda no navegador do
 celular e pode ser instalado na tela inicial. Sem back-end: tudo fica no aparelho.
@@ -41,6 +41,20 @@ js/materials.js     TODAS as regras de cálculo (mexa aqui para ajustar)
 js/app.js           navegação, mapa, telas
 sw.js               cache offline do app (tiles não são cacheados)
 ```
+
+## Achar o imóvel
+
+Na tela do mapa, dois botões no alto à direita:
+
+- **lupa** — busca pelo endereço digitado. Tenta, em ordem: US Census Geocoder
+  (o melhor para endereço americano), Nominatim estruturado, Nominatim livre,
+  Photon e, por último, centraliza no CEP.
+- **alvo** — usa o GPS do aparelho. É o caminho mais rápido em campo, já que o
+  vendedor está parado na frente da casa. Precisa autorizar a localização e
+  o site precisa estar em HTTPS (o `.workers.dev` já é).
+
+Também dá para colar coordenadas direto no campo de endereço, no formato
+`28.5653, -81.5862`.
 
 ## Modos do mapa
 
