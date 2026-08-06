@@ -226,6 +226,7 @@
     }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
     drawLayer = L.layerGroup().addTo(map);
+    initLoupe();
 
     map.on('click', function (e) {
       if (!job) return;
@@ -247,10 +248,24 @@
     renderDraw();
   }
 
+  function levelColor(lv) {
+    return String(lv) === '2' ? '#4FC3F7' : String(lv) === '3' ? '#C77DFF' : '#FFC91B';
+  }
+
+  function levelName(lv) {
+    return String(lv) === '2' ? '2º andar' : String(lv) === '3' ? '3º' : 'térreo';
+  }
+
   function select(i, quiet) {
     selected = i;
     var has = i != null && job && job.runs[i];
-    $('#sel-label').textContent = has ? 'Linha ' + (i + 1) + ' · ' + job.runs[i].points.length + ' pontos' : 'Toque numa linha';
+    $('#sel-label').textContent = has
+      ? 'Linha ' + (i + 1) + ' · ' + levelName(job.runs[i].level)
+      : 'Toque numa linha';
+    $$('#lv-group .lv-btn').forEach(function (b) {
+      b.classList.toggle('is-on', has && String(job.runs[i].level || 1) === b.dataset.level);
+    });
+    $('#lv-group').style.opacity = has ? '1' : '.45';
     $('#btn-continue').disabled = !has;
     $('#btn-del-line').disabled = !has;
     if (!quiet) renderDraw();
@@ -268,7 +283,7 @@
       if (pts.length > 1) {
         L.polyline(pts, { color: '#0E1317', weight: 11, opacity: .35, interactive: false }).addTo(drawLayer);
         var line = L.polyline(pts, {
-          color: isSel ? '#2BE0C0' : '#FFC91B',
+          color: isSel ? '#2BE0C0' : levelColor(run.level),
           weight: isSel ? 7 : 5, opacity: .97, interactive: edit
         }).addTo(drawLayer);
         if (edit) line.on('click', function (ev) { L.DomEvent.stop(ev); select(ri); });
@@ -289,11 +304,13 @@
           draggable: true,
           icon: L.divIcon({ className: 'vertex' + (edit ? ' vertex-edit' : ''), iconSize: [17, 17], iconAnchor: [8.5, 8.5] })
         }).addTo(drawLayer);
+        mk.on('dragstart', function () { showLoupe(mk.getLatLng(), ri, pi); });
         mk.on('drag', function (ev) {
           job.runs[ri].points[pi] = { lat: ev.latlng.lat, lng: ev.latlng.lng };
+          moveLoupe(ev.latlng, ri, pi);
           updateTape();
         });
-        mk.on('dragend', renderDraw);
+        mk.on('dragend', function () { hideLoupe(); renderDraw(); });
         mk.on('click', function (ev) {
           L.DomEvent.stop(ev);
           if (!edit) return;
@@ -350,6 +367,65 @@
     return Calc.haversineFt({ lat: lat, lng: lng }, { lat: c.lat, lng: c.lng });
   }
 
+  /* ---------- lupa de precisão ---------- */
+  var loupeMap = null, loupeLayer = null;
+
+  function initLoupe() {
+    if (loupeMap) return;
+    loupeMap = L.map('loupe-map', {
+      zoomControl: false, attributionControl: false, maxZoom: 22,
+      dragging: false, touchZoom: false, scrollWheelZoom: false,
+      doubleClickZoom: false, boxZoom: false, keyboard: false, tap: false, inertia: false
+    }).setView(map.getCenter(), 21);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxNativeZoom: 19, maxZoom: 22
+    }).addTo(loupeMap);
+    loupeLayer = L.layerGroup().addTo(loupeMap);
+  }
+
+  function showLoupe(latlng, ri, pi) {
+    if (!loupeMap) return;
+    $('#loupe').classList.add('is-on');
+    loupeMap.invalidateSize();
+    loupeMap.setView(latlng, Math.min(map.getZoom() + 2, 22), { animate: false });
+    paintLoupe(latlng, ri, pi);
+  }
+
+  function moveLoupe(latlng, ri, pi) {
+    if (!loupeMap) return;
+    loupeMap.setView(latlng, loupeMap.getZoom(), { animate: false });
+    paintLoupe(latlng, ri, pi);
+  }
+
+  function hideLoupe() {
+    $('#loupe').classList.remove('is-on');
+    if (loupeLayer) loupeLayer.clearLayers();
+  }
+
+  // desenha dentro da lupa só a linha que está sendo mexida
+  function paintLoupe(latlng, ri, pi) {
+    loupeLayer.clearLayers();
+    var run = job.runs[ri];
+    if (!run) return;
+    var pts = run.points.map(function (p) { return [p.lat, p.lng]; });
+    if (pts.length > 1) {
+      L.polyline(pts, { color: '#0E1317', weight: 9, opacity: .4, interactive: false }).addTo(loupeLayer);
+      L.polyline(pts, { color: '#2BE0C0', weight: 4, opacity: .95, interactive: false }).addTo(loupeLayer);
+    }
+    run.points.forEach(function (p, i) {
+      if (i === pi) return;   // o ponto arrastado já fica sob a mira
+      L.marker([p.lat, p.lng], {
+        interactive: false,
+        icon: L.divIcon({ className: 'vertex', iconSize: [11, 11], iconAnchor: [5.5, 5.5] })
+      }).addTo(loupeLayer);
+    });
+    // comprimento dos trechos vizinhos ao ponto arrastado
+    var parts = [];
+    if (pi > 0) parts.push(Math.round(Calc.haversineFt(run.points[pi - 1], run.points[pi]) * settings.calibration));
+    if (pi < run.points.length - 1) parts.push(Math.round(Calc.haversineFt(run.points[pi], run.points[pi + 1]) * settings.calibration));
+    $('#loupe-tag').textContent = parts.join(' ft · ') + (parts.length ? ' ft' : '');
+  }
+
   /* ---------- botões do mapa ---------- */
   $$('[data-mapmode]').forEach(function (b) {
     b.addEventListener('click', function () { setMapMode(b.dataset.mapmode); });
@@ -366,7 +442,8 @@
     if (!job) return;
     var last = job.runs[job.runs.length - 1];
     if (last && !last.points.length) { toast('A linha atual ainda está vazia.'); return; }
-    job.runs.push({ points: [] });
+    var lv = job.runs.length ? (job.runs[job.runs.length - 1].level || 1) : 1;
+    job.runs.push({ points: [], level: lv });
     selected = job.runs.length - 1;
     setMapMode('draw');
     toast('Linha nova. Toque no primeiro canto do beiral.');
@@ -387,6 +464,26 @@
     renderDraw(); select(null, true);
     toast('Linha apagada.');
   });
+  $$('#lv-group .lv-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      if (selected == null) { toast('Selecione uma linha primeiro.'); return; }
+      job.runs[selected].level = +b.dataset.level;
+      renderDraw(); select(selected, true);
+      toast('Linha marcada como ' + levelName(b.dataset.level) + '.');
+    });
+  });
+
+  $('#btn-3d').addEventListener('click', function () {
+    var c = map.getCenter();
+    window.open('https://www.bing.com/maps?cp=' + c.lat.toFixed(6) + '~' + c.lng.toFixed(6) +
+                '&lvl=19&style=b', '_blank');
+  });
+  $('#btn-sv').addEventListener('click', function () {
+    var c = map.getCenter();
+    window.open('https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' +
+                c.lat.toFixed(6) + ',' + c.lng.toFixed(6), '_blank');
+  });
+
   $('#btn-relocate').addEventListener('click', useGps);
   $('#btn-find').addEventListener('click', geocode);
   $('#btn-to-materials').addEventListener('click', function () {
@@ -443,6 +540,12 @@
     $('#mat-feet').textContent = ft(d.m.feet);
     $('#mat-corners').textContent = d.m.corners + ' cantos';
     $('#mat-runs').textContent = d.m.runs + ' linhas';
+    var lv = d.m.byLevel || {}, parts = [];
+    ['1', '2', '3'].forEach(function (k) {
+      if (lv[k]) parts.push(levelName(k) + ' ' + Math.round(lv[k]) + ' ft');
+    });
+    var el = $('#mat-levels');
+    if (el) el.textContent = parts.length > 1 ? parts.join(' · ') : '';
     $('#mat-stories').value = job.stories;
     $('#mat-color').value = job.color || '';
     $$('#seg-size .seg-btn').forEach(function (b) { b.classList.toggle('is-on', +b.dataset.size === +job.size); });

@@ -27,14 +27,20 @@
   function measure(runs, calibration) {
     var cal = calibration || 1;
     var total = 0, segments = 0, corners = 0, live = 0, ends = 0;
+    var byLevel = {}, runsByLevel = {};
     runs.forEach(function (r) {
       var p = r.points || [];
       if (p.length < 2) return;
+      var lv = String(r.level || 1);
       live++;
+      var len = 0;
       for (var i = 1; i < p.length; i++) {
-        total += haversineFt(p[i - 1], p[i]);
+        len += haversineFt(p[i - 1], p[i]);
         segments++;
       }
+      total += len;
+      byLevel[lv] = (byLevel[lv] || 0) + len * cal;
+      runsByLevel[lv] = (runsByLevel[lv] || 0) + 1;
       if (isClosed(p)) {
         corners += p.length - 1;   // volta fechada: todo vértice é canto
       } else {
@@ -47,7 +53,9 @@
       segments: segments,
       corners: corners,
       runs: live,
-      ends: ends
+      ends: ends,
+      byLevel: byLevel,
+      runsByLevel: runsByLevel
     };
   }
 
@@ -74,8 +82,26 @@
     var dsLen = FT_PER_STORY[stories] || 12;
 
     var gutterFt = Math.ceil(feet * (1 + s.wastePct / 100));
-    var dsCount = feet > 0 ? Math.max(m.runs || 1, Math.ceil(feet / s.dsEveryFt)) : 0;
-    var dsFt = dsCount * dsLen;
+
+    // uma descida do 2º andar gasta o dobro de cano de uma do térreo
+    var dsCount = 0, dsFt = 0, straps = 0;
+    var levels = m.byLevel || {};
+    var anyLevel = false;
+    Object.keys(levels).forEach(function (lv) {
+      anyLevel = true;
+      var lvFeet = levels[lv];
+      var lvRuns = (m.runsByLevel || {})[lv] || 1;
+      var n = lvFeet > 0 ? Math.max(lvRuns, Math.ceil(lvFeet / s.dsEveryFt)) : 0;
+      var h = FT_PER_STORY[lv] || 12;
+      dsCount += n;
+      dsFt += n * h;
+      straps += n * (lv === '1' ? 2 : lv === '2' ? 4 : 6);
+    });
+    if (!anyLevel && feet > 0) {           // compatível com orçamentos antigos
+      dsCount = Math.max(m.runs || 1, Math.ceil(feet / s.dsEveryFt));
+      dsFt = dsCount * dsLen;
+      straps = dsCount * (stories === '1' ? 2 : stories === '2' ? 4 : 6);
+    }
     var hangers = Math.ceil(feet / (s.hangerSpacingIn / 12));
 
     return [
@@ -84,9 +110,9 @@
       { key: 'caps', name: 'End Caps', note: '2 por linha aberta', qty: m.ends, unit: 'ea' },
       { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + s.hangerSpacingIn + '"', qty: hangers, unit: 'ea' },
       { key: 'dsCount', name: 'Downspouts', note: '1 a cada ' + s.dsEveryFt + ' ft', qty: dsCount, unit: 'ea' },
-      { key: 'dsFt', name: 'Downspout (comprimento)', note: dsLen + ' ft por descida', qty: dsFt, unit: 'ft' },
+      { key: 'dsFt', name: 'Downspout (comprimento)', note: 'altura conforme o nível de cada linha', qty: dsFt, unit: 'ft' },
       { key: 'elbows', name: 'Elbows', note: '3 por descida (2 em cima, 1 embaixo)', qty: dsCount * 3, unit: 'ea' },
-      { key: 'straps', name: 'Downspout Straps', note: '2 por andar', qty: dsCount * (stories === '1' ? 2 : stories === '2' ? 4 : 6), unit: 'ea' },
+      { key: 'straps', name: 'Downspout Straps', note: '2 por andar de descida', qty: straps, unit: 'ea' },
       { key: 'splash', name: 'Splash Blocks', note: '1 por descida', qty: dsCount, unit: 'ea' },
       { key: 'screws', name: 'Parafusos', note: '1 por hanger + folga', qty: Math.ceil(hangers * 1.1), unit: 'ea' },
       { key: 'sealant', name: 'Vedação (tubos)', note: 'cantos + end caps', qty: Math.max(feet > 0 ? 1 : 0, Math.ceil((m.corners + m.ends) / 8)), unit: 'ea' }
