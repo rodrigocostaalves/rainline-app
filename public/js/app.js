@@ -99,6 +99,7 @@
     $('#map-title').textContent = job.client.name || 'Medir calhas';
     go('map');
     initMap();
+    setMapMode('draw');
     geocode();
   });
 
@@ -126,6 +127,9 @@
   }
 
   /* ---------- mapa e desenho ---------- */
+  var mapMode = 'draw';   // 'draw' = toque cria ponto · 'edit' = toque seleciona
+  var selected = null;    // índice da linha selecionada
+
   function initMap() {
     if (map) return;
     map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 22 })
@@ -134,46 +138,84 @@
       maxNativeZoom: 19, maxZoom: 22,
       attribution: 'Imagery © Esri, Maxar, Earthstar Geographics'
     }).addTo(map);
-    L.control.zoom({ position: 'bottomleft' }).addTo(map);
+    L.control.zoom({ position: 'topright' }).addTo(map);
     drawLayer = L.layerGroup().addTo(map);
 
     map.on('click', function (e) {
       if (!job) return;
+      if (mapMode === 'edit') { select(null); return; }
       if (!job.runs.length) job.runs.push({ points: [] });
-      job.runs[job.runs.length - 1].points.push({ lat: e.latlng.lat, lng: e.latlng.lng });
+      var i = (selected != null && job.runs[selected]) ? selected : job.runs.length - 1;
+      job.runs[i].points.push({ lat: e.latlng.lat, lng: e.latlng.lng });
       renderDraw();
     });
+  }
+
+  function setMapMode(m) {
+    mapMode = m;
+    $$('[data-mapmode]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.mapmode === m); });
+    $('#tools-draw').hidden = m !== 'draw';
+    $('#tools-sel').hidden = m !== 'edit';
+    if (m === 'draw') select(null, true);
+    else toast('Toque numa linha para selecionar.');
+    renderDraw();
+  }
+
+  function select(i, quiet) {
+    selected = i;
+    var has = i != null && job && job.runs[i];
+    $('#sel-label').textContent = has ? 'Linha ' + (i + 1) + ' · ' + job.runs[i].points.length + ' pontos' : 'Toque numa linha';
+    $('#btn-continue').disabled = !has;
+    $('#btn-del-line').disabled = !has;
+    if (!quiet) renderDraw();
   }
 
   function renderDraw() {
     if (!drawLayer) return;
     drawLayer.clearLayers();
+    var edit = mapMode === 'edit';
 
     job.runs.forEach(function (run, ri) {
       var pts = run.points.map(function (p) { return [p.lat, p.lng]; });
+      var isSel = selected === ri;
+
       if (pts.length > 1) {
-        L.polyline(pts, { color: '#FFC91B', weight: 5, opacity: .95 }).addTo(drawLayer);
-        L.polyline(pts, { color: '#101418', weight: 9, opacity: .35 }).addTo(drawLayer).bringToBack();
+        L.polyline(pts, { color: '#0E1317', weight: 11, opacity: .35, interactive: false }).addTo(drawLayer);
+        var line = L.polyline(pts, {
+          color: isSel ? '#2BE0C0' : '#FFC91B',
+          weight: isSel ? 7 : 5, opacity: .97, interactive: edit
+        }).addTo(drawLayer);
+        if (edit) line.on('click', function (ev) { L.DomEvent.stop(ev); select(ri); });
+
         for (var i = 1; i < pts.length; i++) {
           var a = run.points[i - 1], b = run.points[i];
-          var mid = [(a.lat + b.lat) / 2, (a.lng + b.lng) / 2];
           var len = Calc.haversineFt(a, b) * settings.calibration;
-          L.marker(mid, {
+          if (len < 5) continue;   // trecho curto: etiqueta só atrapalha
+          L.marker([(a.lat + b.lat) / 2, (a.lng + b.lng) / 2], {
             interactive: false,
             icon: L.divIcon({ className: 'seg-label', html: Math.round(len) + ' ft', iconSize: [48, 18], iconAnchor: [24, 9] })
           }).addTo(drawLayer);
         }
       }
+
       run.points.forEach(function (p, pi) {
         var mk = L.marker([p.lat, p.lng], {
           draggable: true,
-          icon: L.divIcon({ className: 'vertex', iconSize: [16, 16], iconAnchor: [8, 8] })
+          icon: L.divIcon({ className: 'vertex' + (edit ? ' vertex-edit' : ''), iconSize: [17, 17], iconAnchor: [8.5, 8.5] })
         }).addTo(drawLayer);
         mk.on('drag', function (ev) {
           job.runs[ri].points[pi] = { lat: ev.latlng.lat, lng: ev.latlng.lng };
           updateTape();
         });
         mk.on('dragend', renderDraw);
+        mk.on('click', function (ev) {
+          L.DomEvent.stop(ev);
+          if (!edit) return;
+          job.runs[ri].points.splice(pi, 1);
+          if (job.runs[ri].points.length === 0) { job.runs.splice(ri, 1); selected = null; }
+          renderDraw(); select(selected, true);
+          toast('Ponto removido.');
+        });
       });
     });
     updateTape();
@@ -193,11 +235,45 @@
     $('#read-corners').textContent = m.corners;
   }
 
+  /* ---------- detectar o telhado ---------- */
+  function detectRoof() {
+    var c = map.getCenter();
+    toast('Procurando o contorno do telhado…');
+    var q = '[out:json][timeout:20];way(around:28,' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6) + ')["building"];out geom;';
+    fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var ways = (d.elements || []).filter(function (w) { return w.geometry && w.geometry.length > 3; });
+        if (!ways.length) { toast('Nenhum contorno encontrado aqui. Desenhe na mão.'); return; }
+        // o mais próximo do centro da tela
+        ways.sort(function (a, b) { return distToCenter(a, c) - distToCenter(b, c); });
+        var g = ways[0].geometry.map(function (n) { return { lat: n.lat, lng: n.lon }; });
+        job.runs.push({ points: g });
+        selected = job.runs.length - 1;
+        renderDraw();
+        setMapMode('edit');
+        toast('Contorno encontrado. Apague os lados sem calha e ajuste os cantos.');
+      })
+      .catch(function () { toast('Não consegui consultar agora. Desenhe na mão.'); });
+  }
+
+  function distToCenter(w, c) {
+    var lat = 0, lng = 0;
+    w.geometry.forEach(function (n) { lat += n.lat; lng += n.lon; });
+    lat /= w.geometry.length; lng /= w.geometry.length;
+    return Calc.haversineFt({ lat: lat, lng: lng }, { lat: c.lat, lng: c.lng });
+  }
+
+  /* ---------- botões do mapa ---------- */
+  $$('[data-mapmode]').forEach(function (b) {
+    b.addEventListener('click', function () { setMapMode(b.dataset.mapmode); });
+  });
+  $('#btn-detect').addEventListener('click', detectRoof);
   $('#btn-undo').addEventListener('click', function () {
     if (!job || !job.runs.length) return;
-    var last = job.runs[job.runs.length - 1];
-    last.points.pop();
-    if (!last.points.length && job.runs.length > 1) job.runs.pop();
+    var i = (selected != null && job.runs[selected]) ? selected : job.runs.length - 1;
+    job.runs[i].points.pop();
+    if (!job.runs[i].points.length && job.runs.length > 1) { job.runs.splice(i, 1); selected = null; }
     renderDraw();
   });
   $('#btn-newline').addEventListener('click', function () {
@@ -205,11 +281,25 @@
     var last = job.runs[job.runs.length - 1];
     if (last && !last.points.length) { toast('A linha atual ainda está vazia.'); return; }
     job.runs.push({ points: [] });
+    selected = job.runs.length - 1;
+    setMapMode('draw');
     toast('Linha nova. Toque no primeiro canto do beiral.');
   });
   $('#btn-clear').addEventListener('click', function () {
     if (!job) return;
-    job.runs = []; renderDraw();
+    job.runs = []; selected = null; renderDraw();
+  });
+  $('#btn-continue').addEventListener('click', function () {
+    if (selected == null) { toast('Selecione uma linha primeiro.'); return; }
+    setMapMode('draw');
+    toast('Os próximos toques entram nesta linha.');
+  });
+  $('#btn-del-line').addEventListener('click', function () {
+    if (selected == null) return;
+    job.runs.splice(selected, 1);
+    selected = null;
+    renderDraw(); select(null, true);
+    toast('Linha apagada.');
   });
   $('#btn-relocate').addEventListener('click', geocode);
   $('#btn-to-materials').addEventListener('click', function () {
@@ -245,6 +335,7 @@
     go('map');
     initMap();
     map.setView([job.center.lat, job.center.lng], 21);
+    setMapMode('draw');
     renderDraw();
     toast('Exemplo carregado. Arraste os pontos amarelos para ver a medida mudar.');
   });

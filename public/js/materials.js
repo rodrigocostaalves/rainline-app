@@ -26,7 +26,7 @@
   // runs = [{ points:[{lat,lng},...] }]
   function measure(runs, calibration) {
     var cal = calibration || 1;
-    var total = 0, segments = 0, corners = 0, live = 0;
+    var total = 0, segments = 0, corners = 0, live = 0, ends = 0;
     runs.forEach(function (r) {
       var p = r.points || [];
       if (p.length < 2) return;
@@ -35,15 +35,25 @@
         total += haversineFt(p[i - 1], p[i]);
         segments++;
       }
-      corners += p.length - 2;
+      if (isClosed(p)) {
+        corners += p.length - 1;   // volta fechada: todo vértice é canto
+      } else {
+        corners += p.length - 2;
+        ends += 2;                 // só linha aberta leva end cap
+      }
     });
     return {
       feet: total * cal,
       segments: segments,
       corners: corners,
       runs: live,
-      ends: live * 2
+      ends: ends
     };
+  }
+
+  // fechada = último ponto praticamente em cima do primeiro
+  function isClosed(p) {
+    return p.length > 2 && haversineFt(p[0], p[p.length - 1]) < 3;
   }
 
   function haversineFt(a, b) {
@@ -71,7 +81,7 @@
     return [
       { key: 'gutter', name: (s.size || 5) + '" Seamless Gutter', note: 'inclui ' + s.wastePct + '% de perda', qty: gutterFt, unit: 'ft' },
       { key: 'miters', name: 'Miters / Corners', note: 'cantos medidos no mapa', qty: m.corners, unit: 'ea' },
-      { key: 'caps', name: 'End Caps', note: '2 por linha de calha', qty: m.ends, unit: 'ea' },
+      { key: 'caps', name: 'End Caps', note: '2 por linha aberta', qty: m.ends, unit: 'ea' },
       { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + s.hangerSpacingIn + '"', qty: hangers, unit: 'ea' },
       { key: 'dsCount', name: 'Downspouts', note: '1 a cada ' + s.dsEveryFt + ' ft', qty: dsCount, unit: 'ea' },
       { key: 'dsFt', name: 'Downspout (comprimento)', note: dsLen + ' ft por descida', qty: dsFt, unit: 'ft' },
@@ -143,6 +153,7 @@
     materials: materials,
     price: price,
     qty: qty,
+    isClosed: isClosed,
     haversineFt: haversineFt
   };
 })(window);
