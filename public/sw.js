@@ -1,9 +1,9 @@
-/* RainLine service worker — v0.5.0
+/* RainLine service worker — v0.6.0
    Estratégia: REDE PRIMEIRO para os arquivos do app.
    O cache só entra em ação quando não há internet. Assim, toda vez que você
    publica uma versão nova, o celular pega a nova na hora — sem precisar
    limpar dados do site. */
-const CACHE = 'rainline-v0.5.0';
+const CACHE = 'rainline-v0.7.0';
 const SHELL = [
   './', './index.html', './css/app.css', './js/app.js', './js/materials.js',
   './manifest.json', './icons/icon-192.png', './icons/icon-512.png'

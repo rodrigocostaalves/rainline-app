@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.5</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.7</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -117,6 +117,13 @@
 
   <div id="map"></div>
 
+  <!-- lupa: aparece enquanto você arrasta um ponto -->
+  <div class="loupe" id="loupe" aria-hidden="true">
+    <div class="loupe-map" id="loupe-map"></div>
+    <div class="loupe-cross"></div>
+    <div class="loupe-tag" id="loupe-tag"></div>
+  </div>
+
   <div class="map-tools">
     <div class="mode-switch">
       <button class="mode-btn is-on" data-mapmode="draw">Desenhar</button>
@@ -127,11 +134,18 @@
       <button class="chip" id="btn-undo">Desfazer</button>
       <button class="chip" id="btn-newline">Nova linha</button>
       <button class="chip chip-danger" id="btn-clear">Limpar</button>
+      <button class="chip" id="btn-3d">Ver em 3D</button>
+      <button class="chip" id="btn-sv">Street View</button>
     </div>
     <div class="chips" id="tools-sel" hidden>
       <span class="sel-tag" id="sel-label">Toque numa linha</span>
       <button class="chip" id="btn-continue">Continuar</button>
       <button class="chip chip-danger" id="btn-del-line">Apagar linha</button>
+      <span class="lv-group" id="lv-group">
+        <button class="lv-btn is-on" data-level="1">Térreo</button>
+        <button class="lv-btn" data-level="2">2º andar</button>
+        <button class="lv-btn" data-level="3">3º</button>
+      </span>
     </div>
   </div>
 
@@ -168,7 +182,7 @@
         </label>
         <label class="field"><span>Cor / acabamento</span><input type="text" id="mat-color" placeholder="White"></label>
       </div>
-      <p class="measure-line">Medido: <b id="mat-feet">0 ft</b> · <span id="mat-corners">0 cantos</span> · <span id="mat-runs">0 linhas</span></p>
+      <p class="measure-line">Medido: <b id="mat-feet">0 ft</b> · <span id="mat-corners">0 cantos</span> · <span id="mat-runs">0 linhas</span><br><span id="mat-levels" style="color:var(--patina);font-weight:600"></span></p>
     </div>
 
     <h3 class="section-title">Lista de material <em>toque para editar</em></h3>
@@ -296,13 +310,13 @@
         <label class="field"><span>Usuário</span><input type="text" id="set-user"></label>
         <label class="field"><span>Senha</span><input type="text" id="set-pass"></label>
       </div>
-      <p class="hint">Login local, guardado só neste aparelho. Não é autenticação de verdade — na v0.2 isso vira conta no servidor.</p>
+      <p class="hint">Login local, guardado só neste aparelho. Não é autenticação de verdade — mais pra frente isso vira conta no servidor.</p>
     </div>
 
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.5</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.7</b></p>
   </div>
 </section>
 
