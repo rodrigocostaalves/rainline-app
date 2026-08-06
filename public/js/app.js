@@ -707,7 +707,9 @@
     ref: [],                        // 2 pontos da referência
     runs: [[]],                     // linhas medidas, em pixels da imagem
     scale: 0,                       // pés por pixel
-    level: 1
+    level: 1,
+    view: { z: 1, ox: 0, oy: 0 },   // zoom e deslocamento da foto na tela
+    drag: null                      // ponto sendo arrastado
   };
 
   function photoCanvas() { return document.getElementById('photo-canvas'); }
@@ -732,6 +734,7 @@
         var im = new Image();
         im.onload = function () {
           ph.img = im; ph.w = im.naturalWidth; ph.h = im.naturalHeight;
+          ph.view = { z: 1, ox: 0, oy: 0 };
           $('#photo-empty').hidden = true;
           setPhotoStep('measure'); recalcPhoto();
         };
@@ -759,6 +762,7 @@
     img.onload = function () {
       ph.img = img; ph.w = img.naturalWidth; ph.h = img.naturalHeight;
       ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.step = 'ref';
+      ph.view = { z: 1, ox: 0, oy: 0 };
       setPhotoStep('ref');
       $('#photo-empty').hidden = true;
       drawPhoto();
@@ -799,27 +803,188 @@
     });
   });
 
-  // toque na imagem
-  photoCanvas().addEventListener('click', function (ev) {
-    if (!ph.img) return;
-    var r = photoCanvas().getBoundingClientRect();
-    var x = (ev.clientX - r.left - ph.fit.x) / ph.fit.s;
-    var y = (ev.clientY - r.top - ph.fit.y) / ph.fit.s;
-    if (x < 0 || y < 0 || x > ph.w || y > ph.h) return;
+  /* --- gestos na foto: um dedo arrasta, dois dedos dão zoom,
+         toque simples marca ponto, toque em cima de um ponto arrasta ele --- */
+  (function () {
+    var cv = photoCanvas();
+    var pts = {};              // ponteiros ativos
+    var moved = false, startD = 0, startZ = 1, startMid = null, startOx = 0, startOy = 0;
+    var panFrom = null;
 
-    if (ph.step === 'ref') {
-      if (ph.ref.length >= 2) ph.ref = [];
-      ph.ref.push({ x: x, y: y });
-      if (ph.ref.length === 2) {
-        recalcPhoto();
-        setPhotoStep('measure');
-        toast('Escala definida. Agora trace os beirais.');
-      }
-    } else {
-      ph.runs[ph.runs.length - 1].push({ x: x, y: y });
+    function toImg(cx, cy) {
+      var r = cv.getBoundingClientRect();
+      return {
+        x: (cx - r.left - ph.fit.x) / ph.fit.s,
+        y: (cy - r.top - ph.fit.y) / ph.fit.s
+      };
     }
-    recalcPhoto();
-  });
+
+    // devolve o ponto sob o dedo, se houver
+    function hit(p) {
+      var tol = 20 / ph.fit.s;   // 20 px de tela, convertidos para pixel de imagem
+      var best = null, bd = tol;
+      ph.ref.forEach(function (q, i) {
+        var d = pxLen(p, q);
+        if (d < bd) { bd = d; best = { kind: 'ref', i: i }; }
+      });
+      ph.runs.forEach(function (r, ri) {
+        r.forEach(function (q, pi) {
+          var d = pxLen(p, q);
+          if (d < bd) { bd = d; best = { kind: 'run', ri: ri, pi: pi }; }
+        });
+      });
+      return best;
+    }
+
+    function ids() { return Object.keys(pts); }
+
+    cv.addEventListener('pointerdown', function (e) {
+      if (!ph.img) return;
+      cv.setPointerCapture(e.pointerId);
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var n = ids().length;
+      if (n === 1) {
+        moved = false;
+        var p = toImg(e.clientX, e.clientY);
+        ph.drag = hit(p);
+        panFrom = { x: e.clientX, y: e.clientY, ox: ph.view.ox, oy: ph.view.oy };
+      } else if (n === 2) {
+        ph.drag = null;
+        moved = true;
+        var k = ids();
+        startD = Math.hypot(pts[k[0]].x - pts[k[1]].x, pts[k[0]].y - pts[k[1]].y);
+        startZ = ph.view.z;
+        startOx = ph.view.ox; startOy = ph.view.oy;
+        var r = cv.getBoundingClientRect();
+        startMid = {
+          x: (pts[k[0]].x + pts[k[1]].x) / 2 - r.left,
+          y: (pts[k[0]].y + pts[k[1]].y) / 2 - r.top
+        };
+      }
+    });
+
+    cv.addEventListener('pointermove', function (e) {
+      if (!ph.img || !pts[e.pointerId]) return;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var k = ids();
+
+      if (k.length >= 2) {                       // pinça
+        var d = Math.hypot(pts[k[0]].x - pts[k[1]].x, pts[k[0]].y - pts[k[1]].y);
+        if (startD > 0) {
+          var z = Math.max(1, Math.min(16, startZ * (d / startD)));
+          var f = z / startZ;
+          ph.view.z = z;
+          ph.view.ox = startMid.x - (startMid.x - startOx) * f;
+          ph.view.oy = startMid.y - (startMid.y - startOy) * f;
+          clampView();
+          drawPhoto();
+        }
+        return;
+      }
+
+      var dx = e.clientX - panFrom.x, dy = e.clientY - panFrom.y;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+
+      if (ph.drag) {                             // arrastando um ponto
+        var p = toImg(e.clientX, e.clientY);
+        p.x = Math.max(0, Math.min(ph.w, p.x));
+        p.y = Math.max(0, Math.min(ph.h, p.y));
+        if (ph.drag.kind === 'ref') ph.ref[ph.drag.i] = p;
+        else ph.runs[ph.drag.ri][ph.drag.pi] = p;
+        recalcPhoto();
+      } else if (moved) {                        // arrastando a foto
+        ph.view.ox = panFrom.ox + dx;
+        ph.view.oy = panFrom.oy + dy;
+        clampView();
+        drawPhoto();
+      }
+    });
+
+    function end(e) {
+      if (!pts[e.pointerId]) return;
+      var wasDrag = ph.drag, wasMoved = moved;
+      delete pts[e.pointerId];
+      if (ids().length === 0) {
+        ph.drag = null;
+        if (!wasMoved && !wasDrag && ph.img) addPhotoPoint(e.clientX, e.clientY);
+      }
+      if (ids().length === 1) {                  // soltou um dedo da pinça
+        var k = ids()[0];
+        panFrom = { x: pts[k].x, y: pts[k].y, ox: ph.view.ox, oy: ph.view.oy };
+        moved = true;
+      }
+    }
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+
+    function addPhotoPoint(cx, cy) {
+      var p = toImg(cx, cy);
+      if (p.x < 0 || p.y < 0 || p.x > ph.w || p.y > ph.h) return;
+      if (ph.step === 'ref') {
+        if (ph.ref.length >= 2) ph.ref = [];
+        ph.ref.push(p);
+        if (ph.ref.length === 2) {
+          recalcPhoto();
+          setPhotoStep('measure');
+          toast('Escala definida. Agora trace os beirais.');
+        }
+      } else {
+        ph.runs[ph.runs.length - 1].push(p);
+      }
+      recalcPhoto();
+    }
+
+    // roda do mouse, para quem testar no computador
+    cv.addEventListener('wheel', function (e) {
+      if (!ph.img) return;
+      e.preventDefault();
+      var r = cv.getBoundingClientRect();
+      var mx = e.clientX - r.left, my = e.clientY - r.top;
+      var z = Math.max(1, Math.min(16, ph.view.z * (e.deltaY < 0 ? 1.15 : 0.87)));
+      var f = z / ph.view.z;
+      ph.view.z = z;
+      ph.view.ox = mx - (mx - ph.view.ox) * f;
+      ph.view.oy = my - (my - ph.view.oy) * f;
+      clampView(); drawPhoto();
+    }, { passive: false });
+  })();
+
+  // impede que a foto seja arrastada para fora da tela
+  function clampView() {
+    var st = document.getElementById('photo-stage');
+    if (!st || !ph.img) return;
+    var W = st.clientWidth, H = st.clientHeight, lim = 60;
+    var base = Math.min(W / ph.w, H / ph.h);
+    var iw = ph.w * base * ph.view.z, ih = ph.h * base * ph.view.z;
+    var cx = (W - ph.w * base) / 2, cy = (H - ph.h * base) / 2;
+
+    var maxOx = lim - cx, minOx = W - iw - lim - cx;
+    var maxOy = lim - cy, minOy = H - ih - lim - cy;
+    ph.view.ox = (minOx > maxOx) ? (minOx + maxOx) / 2 : Math.max(minOx, Math.min(maxOx, ph.view.ox));
+    ph.view.oy = (minOy > maxOy) ? (minOy + maxOy) / 2 : Math.max(minOy, Math.min(maxOy, ph.view.oy));
+  }
+
+  function zoomPhoto(mult) {
+    if (!ph.img) return;
+    var st = document.getElementById('photo-stage');
+    var mx = st.clientWidth / 2, my = st.clientHeight / 2;
+    var z = Math.max(1, Math.min(16, ph.view.z * mult));
+    var f = z / ph.view.z;
+    ph.view.z = z;
+    ph.view.ox = mx - (mx - ph.view.ox) * f;
+    ph.view.oy = my - (my - ph.view.oy) * f;
+    clampView(); drawPhoto(); showZoom();
+  }
+
+  function resetPhotoView() {
+    ph.view = { z: 1, ox: 0, oy: 0 };
+    drawPhoto(); showZoom();
+  }
+
+  function showZoom() {
+    var el = $('#photo-zoom');
+    if (el) el.textContent = ph.view.z.toFixed(1) + '×';
+  }
 
   function pxLen(a, b) { return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2)); }
 
@@ -842,6 +1007,7 @@
       ph.scale = px > 0 ? rf / px : 0;
     }
     var t = photoFeet();
+    showZoom();
     $('#photo-total').textContent = Math.round(t.feet);
     $('#photo-scale').textContent = ph.scale
       ? 'escala ok · ' + t.lines + ' linha(s)'
@@ -861,12 +1027,15 @@
     g.clearRect(0, 0, W, H);
     if (!ph.img) return;
 
-    var s = Math.min(W / ph.w, H / ph.h);
-    var x = (W - ph.w * s) / 2, y = (H - ph.h * s) / 2;
-    ph.fit = { x: x, y: y, s: s };
-    g.drawImage(ph.img, x, y, ph.w * s, ph.h * s);
+    var base = Math.min(W / ph.w, H / ph.h);
+    var S = base * ph.view.z;
+    var x = (W - ph.w * base) / 2 + ph.view.ox;
+    var y = (H - ph.h * base) / 2 + ph.view.oy;
+    ph.fit = { x: x, y: y, s: S, base: base };
+    g.imageSmoothingEnabled = ph.view.z < 3;   // no zoom alto, pixel cru ajuda a mirar
+    g.drawImage(ph.img, x, y, ph.w * S, ph.h * S);
 
-    function P(p) { return [x + p.x * s, y + p.y * s]; }
+    function P(p) { return [x + p.x * S, y + p.y * S]; }
 
     // referência em ciano
     if (ph.ref.length) {
@@ -913,6 +1082,10 @@
       });
     });
   }
+
+  $('#btn-zin').addEventListener('click', function () { zoomPhoto(1.6); });
+  $('#btn-zout').addEventListener('click', function () { zoomPhoto(1 / 1.6); });
+  $('#btn-zfit').addEventListener('click', resetPhotoView);
 
   $('#btn-photo-undo').addEventListener('click', function () {
     if (ph.step === 'ref') { ph.ref.pop(); }
