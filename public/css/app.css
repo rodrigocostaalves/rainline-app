@@ -215,6 +215,17 @@ input:focus,select:focus,textarea:focus{
   font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;
   border:1px solid rgba(255,255,255,.14);
 }
+.lv-group{
+  display:inline-flex;background:rgba(14,19,23,.92);border:1px solid rgba(255,255,255,.16);
+  border-radius:999px;padding:3px;box-shadow:var(--sh-2);
+}
+.lv-btn{
+  border:0;background:transparent;color:#A9B4BC;border-radius:999px;padding:7px 12px;
+  font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;
+}
+.lv-btn.is-on{background:#4FC3F7;color:#062631}
+.lv-btn[data-level="1"].is-on{background:var(--tape);color:#2B2000}
+.lv-btn[data-level="3"].is-on{background:#C77DFF;color:#2A0A3D}
 .chip-go{background:rgba(15,107,95,.95);border-color:rgba(255,255,255,.2)}
 .chip[disabled]{opacity:.45}
 .chip{
@@ -225,6 +236,28 @@ input:focus,select:focus,textarea:focus{
 }
 .chip:active{transform:scale(.95)}
 .chip-danger{background:rgba(179,38,30,.92);border-color:rgba(255,255,255,.18)}
+
+/* lupa de precisão */
+.loupe{
+  position:absolute;top:calc(84px + var(--safe-t));left:50%;
+  width:168px;height:168px;margin-left:-84px;border-radius:50%;
+  overflow:hidden;z-index:700;display:none;
+  border:3px solid var(--ink);box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 0 3px rgba(255,201,27,.9);
+  background:#22303A;
+}
+.loupe.is-on{display:block}
+.loupe-map{width:100%;height:100%}
+.loupe-cross{position:absolute;inset:0;pointer-events:none}
+.loupe-cross:before,.loupe-cross:after{
+  content:"";position:absolute;background:rgba(255,255,255,.85);box-shadow:0 0 2px rgba(0,0,0,.9);
+}
+.loupe-cross:before{left:50%;top:calc(50% - 15px);width:1.5px;height:30px;margin-left:-.75px}
+.loupe-cross:after{top:50%;left:calc(50% - 15px);height:1.5px;width:30px;margin-top:-.75px}
+.loupe-tag{
+  position:absolute;left:0;right:0;bottom:8px;text-align:center;pointer-events:none;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
+  color:var(--tape);text-shadow:0 1px 3px rgba(0,0,0,.95);
+}
 
 /* SIGNATURE — fita métrica */
 .tape{
