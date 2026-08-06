@@ -100,6 +100,7 @@
     $('#map-title').textContent = job.client.name || 'Medir calhas';
     go('map');
     initMap();
+    if (!map) return;
     setMapMode('draw');
     geocode();
   });
@@ -117,6 +118,7 @@
 
   // tenta vários serviços em ordem; o Census é o melhor para endereço dos EUA
   function geocode() {
+    if (!map) { toast('O mapa não carregou. Verifique a internet e recarregue.'); return; }
     var c = job.client;
     var q = fullAddress();
 
@@ -200,6 +202,7 @@
 
   // GPS — o vendedor já está na frente do imóvel
   function useGps() {
+    if (!map) { toast('O mapa não carregou. Verifique a internet e recarregue.'); return; }
     if (!navigator.geolocation) { toast('Este aparelho não tem GPS disponível.'); return; }
     toast('Pegando sua posição…');
     navigator.geolocation.getCurrentPosition(
@@ -415,6 +418,7 @@
 
   /* ---------- detectar o telhado ---------- */
   function detectRoof() {
+    if (!map) return;
     var c = map.getCenter();
     toast('Procurando o contorno do telhado…');
     var q = '[out:json][timeout:20];way(around:28,' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6) + ')["building"];out geom;';
@@ -546,11 +550,13 @@
   });
 
   $('#btn-3d').addEventListener('click', function () {
+    if (!map) return;
     var c = map.getCenter();
     window.open('https://www.bing.com/maps?cp=' + c.lat.toFixed(6) + '~' + c.lng.toFixed(6) +
                 '&lvl=19&style=b', '_blank');
   });
   $('#btn-sv').addEventListener('click', function () {
+    if (!map) return;
     var c = map.getCenter();
     window.open('https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' +
                 c.lat.toFixed(6) + ',' + c.lng.toFixed(6), '_blank');
@@ -607,6 +613,7 @@
     $('#map-title').textContent = job.client.name;
     go('map');
     initMap();
+    if (!map) return;
     map.setView([job.center.lat, job.center.lng], 21);
     setMapMode('draw');
     renderDraw();
@@ -1358,15 +1365,251 @@
     }
   });
 
+  /* ---------- imagens para o PDF ----------
+     Monta um PNG do mapa com as linhas desenhadas e um PNG de cada foto
+     com as marcações, para entrarem na proposta. */
+
+  function lngToPx(lng, ws) { return (lng + 180) / 360 * ws; }
+  function latToPx(lat, ws) {
+    var r = lat * Math.PI / 180;
+    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * ws;
+  }
+
+  function loadTile(url) {
+    return new Promise(function (res) {
+      var im = new Image();
+      im.crossOrigin = 'anonymous';
+      var done = false;
+      im.onload = function () { done = true; res(im); };
+      im.onerror = function () { done = true; res(null); };
+      setTimeout(function () { if (!done) res(null); }, 7000);
+      im.src = url;
+    });
+  }
+
+  function mapImage() {
+    var pts = [];
+    job.runs.forEach(function (r) { r.points.forEach(function (p) { pts.push(p); }); });
+    if (pts.length < 2) return Promise.resolve(null);
+
+    var minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    pts.forEach(function (p) {
+      minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+      minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+    });
+    var padLat = (maxLat - minLat) * 0.18 + 0.00004;
+    var padLng = (maxLng - minLng) * 0.18 + 0.00004;
+    minLat -= padLat; maxLat += padLat; minLng -= padLng; maxLng += padLng;
+
+    // maior zoom que ainda cabe em ~1500 px
+    var z = 21;
+    for (; z > 14; z--) {
+      var ws = 256 * Math.pow(2, z);
+      if ((lngToPx(maxLng, ws) - lngToPx(minLng, ws)) <= 1500 &&
+          (latToPx(minLat, ws) - latToPx(maxLat, ws)) <= 1500) break;
+    }
+    var WS = 256 * Math.pow(2, z);
+    var x0 = lngToPx(minLng, WS), x1 = lngToPx(maxLng, WS);
+    var y0 = latToPx(maxLat, WS), y1 = latToPx(minLat, WS);
+    var tx0 = Math.floor(x0 / 256), tx1 = Math.floor(x1 / 256);
+    var ty0 = Math.floor(y0 / 256), ty1 = Math.floor(y1 / 256);
+    if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 49) return Promise.resolve(null);
+
+    var def = LAYERS[layerIdx];
+    if (def.type !== 'xyz') def = LAYERS[0];              // camadas de condado não servem aqui
+    var nz = Math.min(z, def.max);
+    var scale = Math.pow(2, z - nz);
+
+    var W = (tx1 - tx0 + 1) * 256, H = (ty1 - ty0 + 1) * 256;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var g = cv.getContext('2d');
+    g.fillStyle = '#2A3238'; g.fillRect(0, 0, W, H);
+
+    var jobs = [];
+    for (var tx = tx0; tx <= tx1; tx++) {
+      for (var ty = ty0; ty <= ty1; ty++) {
+        (function (tx, ty) {
+          var sx = Math.floor(tx / scale), sy = Math.floor(ty / scale);
+          var url = def.url.replace('{z}', nz).replace('{x}', sx).replace('{y}', sy);
+          jobs.push(loadTile(url).then(function (im) {
+            if (!im) return;
+            var dx = (tx - tx0) * 256, dy = (ty - ty0) * 256;
+            if (scale === 1) { g.drawImage(im, dx, dy, 256, 256); return; }
+            var sub = 256 / scale;                        // recorte do ladrilho de baixo
+            g.imageSmoothingEnabled = true;
+            g.drawImage(im, (tx % scale) * sub, (ty % scale) * sub, sub, sub, dx, dy, 256, 256);
+          }));
+        })(tx, ty);
+      }
+    }
+
+    return Promise.all(jobs).then(function () {
+      var ox = tx0 * 256, oy = ty0 * 256;
+      function P(p) { return [lngToPx(p.lng, WS) - ox, latToPx(p.lat, WS) - oy]; }
+
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      job.runs.forEach(function (run) {
+        if (run.points.length < 2) return;
+        var col = levelColor(run.level);
+        g.strokeStyle = 'rgba(14,19,23,.55)'; g.lineWidth = 11;
+        g.beginPath();
+        run.points.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
+        g.stroke();
+        g.strokeStyle = col; g.lineWidth = 5;
+        g.beginPath();
+        run.points.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
+        g.stroke();
+
+        g.font = '600 15px monospace';
+        for (var i = 1; i < run.points.length; i++) {
+          var a = run.points[i - 1], b = run.points[i];
+          var len = Calc.haversineFt(a, b) * settings.calibration;
+          if (len < 5) continue;
+          var A = P(a), B = P(b);
+          var mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+          var txt = Math.round(len) + " ft";
+          var w = g.measureText(txt).width + 12;
+          g.fillStyle = 'rgba(14,19,23,.9)';
+          g.fillRect(mx - w / 2, my - 12, w, 24);
+          g.fillStyle = col;
+          g.fillText(txt, mx - w / 2 + 6, my + 6);
+        }
+        run.points.forEach(function (p) {
+          var q = P(p);
+          g.fillStyle = col; g.beginPath(); g.arc(q[0], q[1], 6, 0, 6.284); g.fill();
+          g.strokeStyle = '#0E1317'; g.lineWidth = 2.5; g.stroke();
+        });
+      });
+
+      try { return cv.toDataURL('image/jpeg', 0.85); } catch (e) { return null; }
+    });
+  }
+
+  // redesenha uma medição de foto com as marcações, para o PDF
+  function photoImage(entry) {
+    return new Promise(function (res) {
+      if (!entry.img) { res(entry.thumb || null); return; }
+      var im = new Image();
+      im.onload = function () {
+        var MAX = 1100;
+        var s = Math.min(1, MAX / im.naturalWidth);
+        var cv = document.createElement('canvas');
+        cv.width = Math.round(im.naturalWidth * s);
+        cv.height = Math.round(im.naturalHeight * s);
+        var g = cv.getContext('2d');
+        g.drawImage(im, 0, 0, cv.width, cv.height);
+        g.lineCap = 'round'; g.lineJoin = 'round';
+
+        function P(p) { return [p.x * s, p.y * s]; }
+        var px = entry.refPx || 0;
+        var sc = 0;
+        if (entry.ref && entry.ref.length === 2) {
+          var d = Math.hypot(entry.ref[0].x - entry.ref[1].x, entry.ref[0].y - entry.ref[1].y);
+          sc = d > 0 ? (entry.refFeet || 16) / d : 0;
+          g.strokeStyle = '#2BE0C0'; g.lineWidth = 4;
+          g.beginPath();
+          entry.ref.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
+          g.stroke();
+          var A = P(entry.ref[0]), B = P(entry.ref[1]);
+          g.font = '600 15px monospace'; g.fillStyle = '#2BE0C0';
+          g.fillText('ref ' + (entry.refFeet || 16) + " ft", (A[0] + B[0]) / 2 - 26, (A[1] + B[1]) / 2 + 22);
+        }
+
+        (entry.lines || []).forEach(function (r) {
+          if (r.length < 2) return;
+          g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = 9;
+          g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
+          g.strokeStyle = '#FFC91B'; g.lineWidth = 4;
+          g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
+          if (sc) {
+            g.font = '600 15px monospace';
+            for (var i = 1; i < r.length; i++) {
+              var a = P(r[i - 1]), bb = P(r[i]);
+              var len = Math.hypot(r[i].x - r[i - 1].x, r[i].y - r[i - 1].y) * sc;
+              var mx = (a[0] + bb[0]) / 2, my = (a[1] + bb[1]) / 2;
+              var txt = Math.round(len) + " ft";
+              var w = g.measureText(txt).width + 12;
+              g.fillStyle = 'rgba(14,19,23,.9)'; g.fillRect(mx - w / 2, my - 12, w, 24);
+              g.fillStyle = '#FFC91B'; g.fillText(txt, mx - w / 2 + 6, my + 6);
+            }
+          }
+          r.forEach(function (p) {
+            var q = P(p);
+            g.fillStyle = '#FFC91B'; g.beginPath(); g.arc(q[0], q[1], 5, 0, 6.284); g.fill();
+            g.strokeStyle = '#0E1317'; g.lineWidth = 2; g.stroke();
+          });
+        });
+
+        try { res(cv.toDataURL('image/jpeg', 0.82)); } catch (e) { res(entry.thumb || null); }
+      };
+      im.onerror = function () { res(entry.thumb || null); };
+      im.src = entry.img;
+    });
+  }
+
   /* ---------- PDF / compartilhar ---------- */
-  function buildPrint() {
-    var p = job._price, l = job._list, c = job.client;
-    var rows = p.lines.map(function (x) {
-      return '<tr><td>' + x.name + '</td><td>' + (x.unit ? x.qty + ' ' + x.unit : '') + '</td><td>' + money(x.total) + '</td></tr>';
+  function measureRows() {
+    var rows = '';
+    job.runs.forEach(function (r, i) {
+      if (r.points.length < 2) return;
+      var f = Calc.measure([r], settings.calibration).feet;
+      rows += '<tr><td>Run ' + (i + 1) + ' — satellite</td><td>' + levelEn(r.level) + '</td>' +
+              '<td>' + (r.points.length - 1) + '</td><td>' + Math.round(f) + " ft</td></tr>";
+    });
+    (job.manual || []).forEach(function (e, i) {
+      rows += '<tr><td>Run ' + (job.runs.length + i + 1) + ' — photo</td><td>' + levelEn(e.level) + '</td>' +
+              '<td>—</td><td>' + Math.round(e.feet) + " ft</td></tr>";
+    });
+    return rows;
+  }
+
+  var EN = {
+    gutter: 'Seamless Gutter', miters: 'Miters / Corners', caps: 'End Caps',
+    hangers: 'Hidden Hangers', dsCount: 'Downspouts', dsFt: 'Downspout (length)',
+    elbows: 'Elbows', straps: 'Downspout Straps', splash: 'Splash Blocks',
+    screws: 'Screws', sealant: 'Sealant (tubes)'
+  };
+
+  function levelEn(lv) {
+    return String(lv) === '2' ? '2nd floor' : String(lv) === '3' ? '3rd floor' : 'Ground';
+  }
+
+  function buildPrint(mapPng, photoPngs) {
+    var p = job._price, l = job._list, c = job.client, m = job._m;
+    var shown = p.lines.filter(function (x) { return !/^Margem/.test(x.name); });
+    var hidden = p.lines.reduce(function (a, x) { return a + (/^Margem/.test(x.name) ? x.total : 0); }, 0);
+    if (hidden > 0) {
+      var base = shown.reduce(function (a, x) { return a + x.total; }, 0) || 1;
+      shown = shown.map(function (x) {
+        var t = x.total * (1 + hidden / base);
+        return { name: x.name, qty: x.qty, unit: x.unit, total: t };
+      });
+    }
+    var rows = shown.map(function (x) {
+      var n = x.name === 'Instalação' ? 'Installation' : x.name;
+      return '<tr><td>' + n + '</td><td>' + (x.unit ? x.qty + ' ' + x.unit : '') + '</td><td>' + money(x.total) + '</td></tr>';
     }).join('');
     var mat = l.filter(function (i) { return i.qty > 0; }).map(function (i) {
-      return i.qty + ' ' + i.unit + ' — ' + i.name;
+      var n = EN[i.key] || i.name;
+      if (i.key === 'gutter') n = job.size + '" ' + n;
+      return i.qty + ' ' + i.unit + ' — ' + n;
     }).join(' · ');
+
+    var lv = m.byLevel || {};
+    var lvTxt = ['1', '2', '3'].filter(function (k) { return lv[k]; })
+      .map(function (k) { return levelEn(k) + ': ' + Math.round(lv[k]) + ' ft'; }).join(' · ');
+
+    var evidence = '';
+    if (mapPng) {
+      evidence += '<div class="p-shot"><div class="p-title">Aerial measurement</div>' +
+                  '<img src="' + mapPng + '"></div>';
+    }
+    (photoPngs || []).forEach(function (o) {
+      if (!o.png) return;
+      evidence += '<div class="p-shot"><div class="p-title">Facade — ' + levelEn(o.level) +
+                  ' · ' + Math.round(o.feet) + ' ft</div><img src="' + o.png + '"></div>';
+    });
 
     $('#print-area').innerHTML =
       '<div class="p-head"><div><h1>' + (settings.company || 'Gutter Co.') + '</h1>' +
@@ -1374,25 +1617,52 @@
       (settings.license ? '<div>Lic. ' + settings.license + '</div>' : '') + '</div>' +
       '<div style="text-align:right"><div class="p-title">Estimate</div><div>' + job.id + '</div><div>' +
       new Date().toLocaleDateString('en-US') + '</div></div></div>' +
+
       '<div class="p-grid"><div><div class="p-title">Prepared for</div><b>' + (c.name || '') + '</b><br>' +
       (c.phone || '') + '<br>' + (c.email || '') + '</div>' +
       '<div><div class="p-title">Job site</div>' + (fullAddress() || '') + '</div>' +
-      '<div><div class="p-title">Measured</div>' + ft(job._m.feet) + ' of ' + job.size + '" gutter<br>' +
-      job._m.corners + ' corners · ' + Calc.qty(l, 'dsCount') + ' downspouts' + (job.color ? '<br>Color: ' + job.color : '') + '</div></div>' +
+      '<div><div class="p-title">Measured</div>' + ft(m.feet) + ' of ' + job.size + '" gutter<br>' +
+      m.corners + ' corners · ' + Calc.qty(l, 'dsCount') + ' downspouts' +
+      (job.color ? '<br>Color: ' + job.color : '') + '</div></div>' +
+
+      '<div class="p-title">Measurement detail</div>' +
+      '<table class="p-runs"><thead><tr><th>Section</th><th>Level</th><th>Segments</th><th>Length</th></tr></thead>' +
+      '<tbody>' + measureRows() +
+      '<tr class="p-sum"><td><b>Total</b></td><td>' + lvTxt + '</td><td></td><td><b>' + ft(m.feet) + '</b></td></tr>' +
+      '</tbody></table>' +
+
+      evidence +
+
+      '<div class="p-title">Scope &amp; price</div>' +
       '<table><thead><tr><th>Description</th><th>Qty</th><th>Amount</th></tr></thead><tbody>' + rows +
       (p.discount ? '<tr><td>Discount</td><td></td><td>-' + money(p.discount) + '</td></tr>' : '') +
       (p.tax ? '<tr><td>Tax</td><td></td><td>' + money(p.tax) + '</td></tr>' : '') +
       '</tbody></table>' +
       '<div class="p-total"><span>Total</span><span>' + money(p.total) + '</span></div>' +
+
       '<div class="p-foot"><b>Materials included:</b> ' + mat + '.<br>' +
-      'Estimate valid for 30 days. Measurements taken from aerial imagery and verified on site before fabrication. ' +
+      'Estimate valid for 30 days. Aerial lengths taken from orthorectified imagery; facade lengths scaled ' +
+      'from a known reference in the photograph. Measurements verified on site before fabrication. ' +
       'Final quantities may vary within 5%.<br><br>' +
       'Accepted by: ______________________________  Date: ____________</div>';
   }
 
   $('#btn-pdf').addEventListener('click', function () {
-    buildPrint();
-    setTimeout(function () { window.print(); }, 80);
+    toast('Montando o PDF com as marcações…');
+    var shots = (job.manual || []).map(function (e) {
+      return photoImage(e).then(function (png) {
+        return { png: png, level: e.level, feet: e.feet };
+      });
+    });
+    Promise.all([mapImage()].concat(shots))
+      .then(function (all) {
+        buildPrint(all[0], all.slice(1));
+        setTimeout(function () { window.print(); }, 250);
+      })
+      .catch(function () {
+        buildPrint(null, []);
+        setTimeout(function () { window.print(); }, 120);
+      });
   });
 
   $('#btn-share').addEventListener('click', function () {
