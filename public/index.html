@@ -118,9 +118,21 @@
   <div id="map"></div>
 
   <div class="map-tools">
-    <button class="chip" id="btn-undo">Desfazer</button>
-    <button class="chip" id="btn-newline">Nova linha</button>
-    <button class="chip chip-danger" id="btn-clear">Limpar</button>
+    <div class="mode-switch">
+      <button class="mode-btn is-on" data-mapmode="draw">Desenhar</button>
+      <button class="mode-btn" data-mapmode="edit">Ajustar</button>
+    </div>
+    <div class="chips" id="tools-draw">
+      <button class="chip chip-go" id="btn-detect">Detectar telhado</button>
+      <button class="chip" id="btn-undo">Desfazer</button>
+      <button class="chip" id="btn-newline">Nova linha</button>
+      <button class="chip chip-danger" id="btn-clear">Limpar</button>
+    </div>
+    <div class="chips" id="tools-sel" hidden>
+      <span class="sel-tag" id="sel-label">Toque numa linha</span>
+      <button class="chip" id="btn-continue">Continuar</button>
+      <button class="chip chip-danger" id="btn-del-line">Apagar linha</button>
+    </div>
   </div>
 
   <!-- SIGNATURE: leitura em fita métrica -->
