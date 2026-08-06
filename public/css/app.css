@@ -342,6 +342,28 @@ input:focus,select:focus,textarea:focus{
 .photo-acts{display:flex;gap:8px}
 .photo-acts .btn{flex:1;padding:12px 8px;font-size:13.5px;white-space:nowrap}
 
+/* lupa de precisão — aparece ao arrastar um ponto no mapa */
+.loupe{
+  position:absolute;top:calc(84px + var(--safe-t));left:50%;
+  width:168px;height:168px;margin-left:-84px;border-radius:50%;
+  overflow:hidden;z-index:700;display:none;
+  border:3px solid var(--ink);box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 0 3px rgba(255,201,27,.9);
+  background:#22303A;
+}
+.loupe.is-on{display:block}
+.loupe-map{width:100%;height:100%}
+.loupe-cross{position:absolute;inset:0;pointer-events:none}
+.loupe-cross:before,.loupe-cross:after{
+  content:"";position:absolute;background:rgba(255,255,255,.85);box-shadow:0 0 2px rgba(0,0,0,.9);
+}
+.loupe-cross:before{left:50%;top:calc(50% - 15px);width:1.5px;height:30px;margin-left:-.75px}
+.loupe-cross:after{top:50%;left:calc(50% - 15px);height:1.5px;width:30px;margin-top:-.75px}
+.loupe-tag{
+  position:absolute;left:0;right:0;bottom:8px;text-align:center;pointer-events:none;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
+  color:var(--tape);text-shadow:0 1px 3px rgba(0,0,0,.95);
+}
+
 /* SIGNATURE — fita métrica */
 .tape{
   position:absolute;left:0;right:0;bottom:0;z-index:610;
