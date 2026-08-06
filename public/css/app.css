@@ -226,6 +226,9 @@ input:focus,select:focus,textarea:focus{
 .lv-btn.is-on{background:#4FC3F7;color:#062631}
 .lv-btn[data-level="1"].is-on{background:var(--tape);color:#2B2000}
 .lv-btn[data-level="3"].is-on{background:#C77DFF;color:#2A0A3D}
+.chip-layer{background:rgba(15,107,95,.95);border-color:rgba(255,255,255,.2)}
+.chip.is-on{background:var(--tape);color:#2B2000;border-color:var(--tape-lo)}
+.tiles-boost .leaflet-tile{filter:contrast(1.3) saturate(1.15) brightness(1.06)}
 .chip-go{background:rgba(15,107,95,.95);border-color:rgba(255,255,255,.2)}
 .chip[disabled]{opacity:.45}
 .chip{
