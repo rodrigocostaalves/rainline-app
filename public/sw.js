@@ -3,9 +3,9 @@
    O cache só entra em ação quando não há internet. Assim, toda vez que você
    publica uma versão nova, o celular pega a nova na hora — sem precisar
    limpar dados do site. */
-const CACHE = 'rainline-v0.15.0';
+const CACHE = 'rainline-v0.17.0';
 const SHELL = [
-  './', './index.html', './css/app.css', './js/app.js', './js/materials.js',
+  './', './index.html', './css/app.css', './js/app.js', './js/materials.js', './js/api.js',
   './manifest.json', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
@@ -26,7 +26,8 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  if (url.origin !== location.origin) return;   // tiles, CDN e APIs: direto da rede
+  if (url.origin !== location.origin) return;      // tiles e CDN: direto da rede
+  if (url.pathname.startsWith('/api/')) return;    // API nunca entra em cache
 
   e.respondWith(
     fetch(e.request)
