@@ -41,6 +41,41 @@
     if (name === 'history') renderHistory();
     if (name === 'settings') { fillSettings(); renderCloudCard(); }
   }
+  // pai de cada tela, para o botão voltar do aparelho andar dentro do app
+  var PARENT = {
+    job: 'home', map: 'job', parts: 'map', photo: 'parts',
+    materials: 'parts', quote: 'materials',
+    clients: 'home', history: 'home', settings: 'home'
+  };
+
+  function currentScreen() {
+    var el = document.querySelector('.screen.is-active');
+    return el ? el.id.replace('screen-', '') : 'home';
+  }
+
+  function armBack() { history.pushState({ rl: 1 }, ''); }
+
+  window.addEventListener('popstate', function () {
+    var cur = currentScreen();
+    if (cur === 'login') { armBack(); return; }
+    if (PARENT[cur]) { go(PARENT[cur]); armBack(); return; }
+    // está no painel: confirma antes de sair mesmo
+    var pend = jobs.filter(function (j) { return j.pending; }).length;
+    var msg = pend
+      ? 'Sair do RainLine? Há ' + pend + ' orçamento(s) ainda não enviados para a nuvem.'
+      : 'Sair do RainLine?';
+    if (confirm(msg)) history.back();
+    else armBack();
+  });
+
+  // avisa se fechar a aba com orçamento em edição
+  window.addEventListener('beforeunload', function (e) {
+    if (job && !job.savedAt && (job.runs.length || (job.manual || []).length)) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-go],[data-back],[data-action]');
     if (!b) return;
@@ -479,9 +514,10 @@
     return String(lv) === '2' ? '#4FC3F7' : String(lv) === '3' ? '#C77DFF' : '#FFC91B';
   }
 
-  var SIDES = ['frente', 'direita', 'fundo', 'esquerda'];
+  var SIDES = ['toda', 'frente', 'direita', 'fundo', 'esquerda'];
   function sideName(s2) {
-    return { frente: 'frente', direita: 'lado direito', fundo: 'fundo', esquerda: 'lado esquerdo' }[s2] || 'frente';
+    return { toda: 'casa inteira', frente: 'frente', direita: 'lado direito',
+             fundo: 'fundo', esquerda: 'lado esquerdo' }[s2] || 'frente';
   }
 
   function levelName(lv) {
@@ -824,7 +860,11 @@
     $('#parts-photo').innerHTML = ph2 || '<p class="hint" style="margin:0">Nenhuma foto medida ainda.</p>';
 
     var done = {};
-    (job.manual || []).forEach(function (e) { if (e.side) done[e.side] = true; });
+    (job.manual || []).forEach(function (e) {
+      if (!e.side) return;
+      done[e.side] = true;
+      if (e.side === 'toda') SIDES.forEach(function (k) { done[k] = true; });
+    });
     $('#sides-check').innerHTML = SIDES.map(function (k) {
       return '<span class="side-chip ' + (done[k] ? 'ok' : '') + '">' +
         (done[k] ? '✓ ' : '') + sideName(k) + '</span>';
@@ -876,7 +916,8 @@
     fit: { x: 0, y: 0, s: 1 },      // como ela está desenhada na tela
     step: 'ref',
     ref: [],                        // 2 pontos da referência
-    runs: [[]],                     // linhas medidas, em pixels da imagem
+    runs: [[]],                     // beirais, em pixels da imagem
+    dsRuns: [[]],                   // descidas (downspouts) — contadas, não somadas em ft
     scale: 0,                       // pés por pixel
     level: 1,
     view: { z: 1, ox: 0, oy: 0 },   // zoom e deslocamento da foto na tela
@@ -1043,7 +1084,7 @@
   function openPhoto(idx) {
     ph.editing = (idx == null) ? null : idx;
     if (idx == null) {
-      ph.img = null; ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.level = 1;
+      ph.img = null; ph.ref = []; ph.runs = [[]]; ph.dsRuns = [[]]; ph.scale = 0; ph.level = 1;
       try {
         var last = localStorage.getItem('rainline.ref');
         if (last) $('#ref-feet').value = last;
@@ -1057,9 +1098,12 @@
       $$('[data-side]').forEach(function (o) {
         o.classList.toggle('is-on', o.dataset.side === ph.side);
       });
-      ph.ref = (e.ref || []).slice();
-      ph.runs = (e.lines && e.lines.length) ? JSON.parse(JSON.stringify(e.lines)) : [[]];
+      ph.pendingEntry = e;                        // as coordenadas só depois que a imagem carregar
+      // o valor gravado está sempre em pés: força a unidade certa
+      ph.unit = 'ft';
+      $$('#unit-sw .u-btn').forEach(function (o) { o.classList.toggle('is-on', o.dataset.unit === 'ft'); });
       $('#ref-feet').value = e.refFeet || 16;
+      refLabel((e.refFeet || 16) + ' ft');
       var srcImg = e.img || (e.key ? Api.photoUrl(e.key) : null);
       if (srcImg) {
         var im = new Image();
@@ -1067,6 +1111,8 @@
           ph.img = im; ph.w = im.naturalWidth; ph.h = im.naturalHeight;
           ph.view = { z: 1, ox: 0, oy: 0 };
           buildEdges(im);
+          restoreEntryPoints(ph.pendingEntry);
+          ph.pendingEntry = null;
           $('#photo-empty').hidden = true;
           setPhotoStep('measure'); recalcPhoto();
         };
@@ -1101,7 +1147,7 @@
     var img = new Image();
     img.onload = function () {
       ph.img = img; ph.w = img.naturalWidth; ph.h = img.naturalHeight;
-      ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.step = 'ref';
+      ph.ref = []; ph.runs = [[]]; ph.dsRuns = [[]]; ph.scale = 0; ph.step = 'ref';
       ph.view = { z: 1, ox: 0, oy: 0 };
       candidates = [];
       buildEdges(img);
@@ -1115,13 +1161,37 @@
     e.target.value = '';
   }
 
+  // devolve os pontos guardados para a escala da imagem atual
+  function restoreEntryPoints(e) {
+    if (!e) { ph.ref = []; ph.runs = [[]]; ph.dsRuns = [[]]; return; }
+    var fx = e.norm ? ph.w : 1, fy = e.norm ? ph.h : 1;
+    function back(arr) {
+      return (arr || []).map(function (r) {
+        return r.map(function (q) { return { x: q.x * fx, y: q.y * fy }; });
+      });
+    }
+    ph.ref = (e.ref || []).map(function (q) { return { x: q.x * fx, y: q.y * fy }; });
+    ph.runs = back(e.lines);
+    if (!ph.runs.length) ph.runs = [[]];
+    ph.dsRuns = back(e.dsLines);
+    if (!ph.dsRuns.length) ph.dsRuns = [[]];
+  }
+
   function setPhotoStep(s) {
     ph.step = s;
     $$('[data-pstep]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.pstep === s); });
-    $('#ref-row').style.opacity = s === 'ref' ? '1' : '.5';
-    // definida a escala, as opções de referência não servem mais: some com elas
-    if (s === 'measure') setBarMin(true);
+    if (s !== 'ref') { $('#ref-row').hidden = true; setBarMin(true); }
+    if (s === 'down') toast('Trace uma linha por descida, de cima até o chão.');
   }
+
+  $('#ref-open').addEventListener('click', function () {
+    var r = $('#ref-row');
+    r.hidden = !r.hidden;
+    if (!r.hidden) setBarMin(false);
+    setTimeout(function () { if (ph.img) { computeFit(); clampView(); drawPhoto(); } }, 60);
+  });
+
+  function refLabel(txt) { $('#ref-current').textContent = txt; }
 
   function setBarMin(min) {
     var bar = $('#photo-bar');
@@ -1155,6 +1225,7 @@
       $$('[data-ref]').forEach(function (o) { o.classList.remove('is-on'); });
       b.classList.add('is-on');
       $('#ref-feet').value = b.dataset.ref;
+      refLabel(b.textContent.trim());
       try { localStorage.setItem('rainline.ref', b.dataset.ref); } catch (e) {}
       recalcPhoto();
     });
@@ -1166,6 +1237,7 @@
       $$('#unit-sw .u-btn').forEach(function (o) { o.classList.remove('is-on'); });
       b.classList.add('is-on');
       ph.unit = b.dataset.unit;
+      refLabel($('#ref-feet').value + ' ' + ph.unit);
       recalcPhoto();
     });
   });
@@ -1174,6 +1246,7 @@
     $$('[data-ref]').forEach(function (o) { o.classList.remove('is-on'); });
     $$('#unit-sw .u-btn').forEach(function (o) { o.classList.toggle('is-on', o.dataset.unit === 'm'); });
     ph.unit = 'm';
+    refLabel('régua da imagem');
     $('#ref-feet').value = '';
     $('#ref-feet').focus();
     toast('Digite o número da régua e trace em cima dela, ponta a ponta.');
@@ -1205,9 +1278,10 @@
 
     function toImg(cx, cy) {
       var r = cv.getBoundingClientRect();
+      var f = computeFit();
       return {
-        x: (cx - r.left - ph.fit.x) / ph.fit.s,
-        y: (cy - r.top - ph.fit.y) / ph.fit.s
+        x: (cx - r.left - f.x) / f.s,
+        y: (cy - r.top - f.y) / f.s
       };
     }
 
@@ -1223,6 +1297,12 @@
         r.forEach(function (q, pi) {
           var d = pxLen(p, q);
           if (d < bd) { bd = d; best = { kind: 'run', ri: ri, pi: pi }; }
+        });
+      });
+      ph.dsRuns.forEach(function (r, ri) {
+        r.forEach(function (q, pi) {
+          var d = pxLen(p, q);
+          if (d < bd) { bd = d; best = { kind: 'ds', ri: ri, pi: pi }; }
         });
       });
       return best;
@@ -1287,6 +1367,7 @@
         p.y = Math.max(0, Math.min(ph.h, p.y));
         p = snapToEdge(p);
         if (ph.drag.kind === 'ref') ph.ref[ph.drag.i] = p;
+        else if (ph.drag.kind === 'ds') ph.dsRuns[ph.drag.ri][ph.drag.pi] = p;
         else ph.runs[ph.drag.ri][ph.drag.pi] = p;
         showPhLoupe(p);
         recalcPhoto();
@@ -1331,6 +1412,8 @@
           setPhotoStep('measure');
           toast('Escala definida. Agora trace os beirais.');
         }
+      } else if (ph.step === 'down') {
+        ph.dsRuns[ph.dsRuns.length - 1].push(p);
       } else {
         ph.runs[ph.runs.length - 1].push(p);
       }
@@ -1408,6 +1491,17 @@
     return ph.unit === 'm' ? v * 3.280839895 : v;
   }
 
+  function photoDs() {
+    var n = 0, feet = 0;
+    ph.dsRuns.forEach(function (r) {
+      if (r.length < 2) return;
+      n++;
+      if (!ph.scale) return;
+      for (var i = 1; i < r.length; i++) feet += pxLen(r[i - 1], r[i]) * ph.scale;
+    });
+    return { count: n, feet: feet };
+  }
+
   function recalcPhoto() {
     var rf = refFeetValue();
     if (ph.ref.length === 2 && rf > 0) {
@@ -1419,10 +1513,28 @@
     $('#photo-total').textContent = Math.round(t.feet);
     var ff = $('#ph-float-ft');
     if (ff) ff.textContent = Math.round(t.feet);
+    var ds = photoDs();
     $('#photo-scale').textContent = ph.scale
-      ? 'escala ok · ' + t.lines + ' linha(s)'
+      ? 'escala ok · ' + t.lines + ' linha(s)' + (ds.count ? ' · ' + ds.count + ' descida(s)' : '')
       : 'sem escala ainda';
     drawPhoto();
+  }
+
+  // calcula onde a foto está desenhada agora. Qualquer mudança de layout
+  // (abrir opções, tela toda, girar o aparelho) muda isto — e o toque precisa
+  // usar o valor de agora, não o de antes.
+  function computeFit() {
+    var st = document.getElementById('photo-stage');
+    if (!st || !ph.img) return ph.fit;
+    var W = st.clientWidth, H = st.clientHeight;
+    var base = Math.min(W / ph.w, H / ph.h);
+    ph.fit = {
+      x: (W - ph.w * base) / 2 + ph.view.ox,
+      y: (H - ph.h * base) / 2 + ph.view.oy,
+      s: base * ph.view.z,
+      base: base
+    };
+    return ph.fit;
   }
 
   function drawPhoto() {
@@ -1479,6 +1591,21 @@
       });
       g.restore();
     }
+
+    // descidas em laranja: contadas, não entram na metragem de calha
+    ph.dsRuns.forEach(function (r) {
+      if (r.length > 1) {
+        g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = 9;
+        g.beginPath(); r.forEach(function (q, i) { var a = P(q); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); }); g.stroke();
+        g.strokeStyle = '#FF8A3D'; g.lineWidth = 5;
+        g.beginPath(); r.forEach(function (q, i) { var a = P(q); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); }); g.stroke();
+      }
+      r.forEach(function (q) {
+        var a = P(q);
+        g.fillStyle = '#FF8A3D'; g.beginPath(); g.arc(a[0], a[1], 6, 0, 6.284); g.fill();
+        g.strokeStyle = '#0E1317'; g.lineWidth = 2; g.stroke();
+      });
+    });
 
     // beirais em amarelo, com a medida de cada trecho
     ph.runs.forEach(function (r) {
@@ -1831,9 +1958,10 @@
   $('#btn-photo-undo').addEventListener('click', function () {
     if (ph.step === 'ref') { ph.ref.pop(); }
     else {
-      var last = ph.runs[ph.runs.length - 1];
+      var arr = (ph.step === 'down') ? ph.dsRuns : ph.runs;
+      var last = arr[arr.length - 1];
       last.pop();
-      if (!last.length && ph.runs.length > 1) ph.runs.pop();
+      if (!last.length && arr.length > 1) arr.pop();
     }
     recalcPhoto();
   });
@@ -1843,10 +1971,11 @@
   });
 
   $('#btn-photo-newline').addEventListener('click', function () {
-    if (ph.step !== 'measure') { toast('Termine a referência primeiro.'); return; }
-    if (!ph.runs[ph.runs.length - 1].length) { toast('A linha atual está vazia.'); return; }
-    ph.runs.push([]);
-    toast('Linha nova na foto.');
+    if (ph.step === 'ref') { toast('Termine a referência primeiro.'); return; }
+    var arr = (ph.step === 'down') ? ph.dsRuns : ph.runs;
+    if (!arr[arr.length - 1].length) { toast('A linha atual está vazia.'); return; }
+    arr.push([]);
+    toast(ph.step === 'down' ? 'Próxima descida.' : 'Linha nova na foto.');
   });
 
   function shrink(img, maxW, q) {
@@ -1862,15 +1991,27 @@
     var t = photoFeet();
     if (t.feet < 1) { toast('Trace pelo menos uma linha com escala definida.'); return; }
     job.manual = job.manual || [];
+    // guarda tudo em coordenada relativa (0..1). A imagem é reduzida ao salvar,
+    // então coordenada absoluta sairia do lugar ao reabrir.
+    function norm(arr) {
+      return arr.map(function (r) {
+        return r.map(function (q) { return { x: q.x / ph.w, y: q.y / ph.h }; });
+      });
+    }
+    var ds = photoDs();
     var entry = {
       feet: Math.round(t.feet),
       corners: t.corners,
       level: ph.level,
       side: ph.side,
-      note: 'Foto · ' + sideName(ph.side) + ' · ' + levelName(ph.level),
-      refFeet: refFeetValue(),
-      ref: ph.ref.slice(),
-      lines: JSON.parse(JSON.stringify(ph.runs)),
+      dsCount: ds.count,
+      dsFeet: Math.round(ds.feet),
+      note: 'Foto · ' + sideName(ph.side) + (ds.count ? ' · ' + ds.count + ' descida(s)' : ''),
+      refFeet: refFeetValue(),                    // sempre gravado em pés
+      norm: true,
+      ref: ph.ref.map(function (q) { return { x: q.x / ph.w, y: q.y / ph.h }; }),
+      lines: norm(ph.runs),
+      dsLines: norm(ph.dsRuns),
       thumb: shrink(ph.img, 220, 0.6),
       img: shrink(ph.img, 1280, 0.72)
     };
@@ -1881,13 +2022,31 @@
     renderParts();
   });
 
-  window.addEventListener('resize', function () { if (ph.img) drawPhoto(); });
+  window.addEventListener('resize', function () { if (ph.img) { clampView(); drawPhoto(); } });
+
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(function () {
+      if (ph.img) { computeFit(); clampView(); drawPhoto(); }
+    });
+    ro.observe(document.getElementById('photo-stage'));
+  }
 
   /* ---------- materiais ---------- */
   function currentList() {
     var m = Calc.measure(job.runs, settings.calibration, job.manual);
     var cfg = Object.assign({}, settings, { size: job.size, stories: job.stories });
     var list = Calc.materials(m, cfg);
+    // descidas marcadas na foto mandam mais que a estimativa automática
+    var dsMarked = (job.manual || []).reduce(function (a, e) { return a + (Number(e.dsCount) || 0); }, 0);
+    var dsFeet = (job.manual || []).reduce(function (a, e) { return a + (Number(e.dsFeet) || 0); }, 0);
+    if (dsMarked > 0 && job.overrides.dsCount == null) {
+      list.forEach(function (i) {
+        if (i.key === 'dsCount') { i.qty = dsMarked; i.note = 'marcadas na foto'; }
+        if (i.key === 'dsFt' && dsFeet > 0) { i.qty = Math.round(dsFeet); i.note = 'medidas na foto'; }
+        if (i.key === 'elbows') i.qty = dsMarked * 3;
+        if (i.key === 'splash') i.qty = dsMarked;
+      });
+    }
     list.forEach(function (i) {
       if (job.overrides[i.key] != null) i.qty = job.overrides[i.key];
     });
@@ -1939,10 +2098,36 @@
 
   function setStatus(st) {
     job.status = st;
-    $$('#status-row .st-btn').forEach(function (b) {
+    $$('#margin-row .st-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      job.marginMode = b.dataset.margin;
+      if (b.dataset.margin === 'value' && !settings.marginValue) {
+        toast('Defina o valor da margem em Configurações.');
+      }
+      if (b.dataset.margin === 'pct' && !settings.marginPct) {
+        toast('Defina o percentual da margem em Configurações.');
+      }
+      renderQuote();
+    });
+  });
+
+  $$('#status-row .st-btn').forEach(function (b) {
       b.classList.toggle('is-on', b.dataset.status === st);
     });
   }
+
+  $$('#margin-row .st-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      job.marginMode = b.dataset.margin;
+      if (b.dataset.margin === 'value' && !settings.marginValue) {
+        toast('Defina o valor da margem em Configurações.');
+      }
+      if (b.dataset.margin === 'pct' && !settings.marginPct) {
+        toast('Defina o percentual da margem em Configurações.');
+      }
+      renderQuote();
+    });
+  });
 
   $$('#status-row .st-btn').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -2010,7 +2195,12 @@
     $('#btn-delete-job').style.display = job.savedAt ? '' : 'none';
     $('#quote-discount').value = job.discount || 0;
     $('#quote-tax').value = job.taxPct || 0;
-    var cfg = Object.assign({}, d.cfg, { discount: job.discount, taxPct: job.taxPct });
+    var cfg = Object.assign({}, d.cfg, {
+      discount: job.discount, taxPct: job.taxPct, marginMode: job.marginMode || 'none'
+    });
+    $$('#margin-row .st-btn').forEach(function (b) {
+      b.classList.toggle('is-on', b.dataset.margin === (job.marginMode || 'none'));
+    });
     var p = Calc.price(d.list, cfg);
     job._price = p; job._list = d.list; job._m = d.m;
 
@@ -2421,6 +2611,7 @@
     '#p-lf5': 'lf5', '#p-lf6': 'lf6', '#p-ds': 'dsFt', '#p-miter': 'miter', '#p-min': 'minJob',
     '#d-lf5': 'd_lf5', '#d-lf6': 'd_lf6', '#d-ds': 'd_ds', '#d-elbow': 'd_elbow', '#d-miter': 'd_miter',
     '#d-cap': 'd_cap', '#d-hanger': 'd_hanger', '#d-splash': 'd_splash', '#d-labor': 'd_labor', '#d-markup': 'd_markup',
+    '#p-mval': 'marginValue', '#p-mpct': 'marginPct',
     '#r-hanger': 'hangerSpacingIn', '#r-ds': 'dsEveryFt', '#r-waste': 'wastePct', '#r-cal': 'calibration',
     '#set-user': 'user', '#set-pass': 'pass'
   };
@@ -2524,6 +2715,7 @@
 
   /* ---------- boot ---------- */
   if (load(K.sess, null)) go('home');
+  armBack();
   bootCloud();
   Api.health().then(function (ok) {
     var m = $('#login-mode');

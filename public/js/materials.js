@@ -13,6 +13,7 @@
     d_lf5: 2.20, d_lf6: 3.10, d_ds: 2.40, d_elbow: 4.50,
     d_miter: 12.00, d_cap: 3.50, d_hanger: 3.20, d_splash: 8.00,
     d_labor: 3.50, d_markup: 45,
+    marginValue: 0, marginPct: 0,
     // regras
     hangerSpacingIn: 24,   // Flórida: 24" por causa de vento/chuva forte
     dsEveryFt: 35,         // 1 descida a cada ~35 ft de calha
@@ -169,6 +170,15 @@
       add(size + '" Seamless Gutter installed', gutterFt, size === '6' ? s.lf6 : s.lf5, 'ft');
       add('Downspouts installed', qty(list, 'dsFt'), s.dsFt, 'ft');
       add('Miters / Corners', qty(list, 'miters'), s.miter);
+    }
+
+    // margem escolhida no orçamento: entra antes do mínimo e do desconto
+    var mg = 0;
+    if (s.marginMode === 'value') mg = Number(s.marginValue) || 0;
+    else if (s.marginMode === 'pct') mg = subtotal * ((Number(s.marginPct) || 0) / 100);
+    if (mg > 0) {
+      lines.push({ name: 'Margem comercial', qty: 1, unit: '', unitPrice: mg, total: mg });
+      subtotal += mg;
     }
 
     var minApplied = false;
