@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.19</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.21</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -58,7 +58,7 @@
     </div>
     <div class="stat-strip">
       <div class="stat"><b id="stat-month">0</b><span>Orçamentos no mês</span></div>
-      <div class="stat"><b id="stat-value">$0</b><span>Valor no mês</span></div>
+      <div class="stat"><b id="stat-value">$0</b><span>Fechado no mês</span></div>
     </div>
     <div class="menu-grid">
       <button class="tile tile-primary" data-go="job">
@@ -107,7 +107,7 @@
         <label class="field"><span>ZIP</span><input type="text" id="job-zip" inputmode="numeric"></label>
       </div>
       <label class="field"><span>Observações</span><textarea id="job-notes" rows="2"></textarea></label>
-      <button class="btn btn-primary btn-block" type="submit">Buscar imóvel</button>
+      <button class="btn btn-primary btn-block" type="submit" id="btn-job-submit">Buscar imóvel</button>
       <p class="hint">Se o endereço não for encontrado, use o <b>GPS</b> na tela do mapa — você já está na frente da casa. Também dá pra colar <b>lat, lng</b> no campo de endereço.</p>
     </form>
   </div>
@@ -214,6 +214,14 @@
 
   <div class="photo-stage" id="photo-stage">
     <canvas id="photo-canvas"></canvas>
+    <canvas id="ph-loupe" class="ph-loupe" width="336" height="336"></canvas>
+    <div class="ph-float" id="ph-float">
+      <div class="ph-float-read"><b id="ph-float-ft">0</b><span>ft</span></div>
+      <button id="ph-undo2">Desfazer</button>
+      <button id="ph-newline2">Nova linha</button>
+      <button id="ph-exit-full" class="ph-primary">Opções</button>
+    </div>
+    <button class="ph-full-btn" id="btn-full">⤢ Tela toda</button>
     <div class="photo-empty" id="photo-empty">
       <p>Tire um print do Street View (ou uma foto da fachada) e carregue aqui.<br>
       Serve para pegar os beirais que o satélite não mostra.</p>
@@ -325,6 +333,20 @@
     <span></span>
   </header>
   <div class="pad">
+    <div class="card" id="status-card">
+      <span class="field-label">Situação</span>
+      <div class="status-row" id="status-row">
+        <button class="st-btn" data-status="draft">Rascunho</button>
+        <button class="st-btn" data-status="sent">Em análise</button>
+        <button class="st-btn" data-status="accepted">Fechado</button>
+        <button class="st-btn" data-status="lost">Recusado</button>
+      </div>
+      <div class="quick-row">
+        <button class="qk" data-qk="client">Editar cliente</button>
+        <button class="qk" data-qk="map">Rever medições</button>
+        <button class="qk" data-qk="materials">Materiais</button>
+      </div>
+    </div>
     <div class="card" id="quote-box"></div>
     <div class="row-2">
       <label class="field"><span>Desconto ($)</span><input type="number" id="quote-discount" value="0" step="1" inputmode="decimal"></label>
@@ -338,6 +360,7 @@
       <button class="btn btn-dark" id="btn-pdf">Gerar PDF</button>
       <button class="btn btn-dark" id="btn-share">Compartilhar</button>
     </div>
+    <button class="btn btn-ghost btn-block" id="btn-delete-job" style="color:var(--alert)">Excluir orçamento</button>
   </div>
 </section>
 
@@ -460,7 +483,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.19</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.21</b></p>
   </div>
 </section>
 
