@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.24</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.25</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -130,26 +130,26 @@
     <div class="loupe-tag" id="loupe-tag"></div>
   </div>
 
-  <div class="map-rail" id="map-rail">
-    <button class="rail-toggle" id="rail-toggle" aria-label="Mostrar/ocultar ferramentas">›</button>
-    <div class="rail-body" id="rail-body">
+  <div class="map-dock" id="map-dock">
+    <div class="dock-row">
       <div class="mode-switch">
         <button class="mode-btn is-on" data-mapmode="draw">Desenhar</button>
         <button class="mode-btn" data-mapmode="edit">Ajustar</button>
       </div>
-      <div class="rail-group" id="tools-draw">
+      <div class="dock-scroll" id="tools-draw">
         <button class="rail-btn rail-go" id="btn-detect">Detectar telhado</button>
         <button class="rail-btn" id="btn-parts">Medições <span class="parts-badge" id="parts-count">0</span></button>
         <button class="rail-btn" id="btn-undo">Desfazer</button>
         <button class="rail-btn" id="btn-newline">Nova linha</button>
         <button class="rail-btn rail-photo" id="btn-photo">Medir na foto</button>
+        <button class="rail-btn" id="btn-detect-osm">Contorno OSM</button>
         <button class="rail-btn" id="btn-3d">Ver em 3D</button>
         <button class="rail-btn" id="btn-sv">Street View</button>
         <button class="rail-btn" id="btn-layer">Imagem: Esri</button>
         <button class="rail-btn" id="btn-enhance">Realçar</button>
         <button class="rail-btn rail-danger" id="btn-clear">Limpar</button>
       </div>
-      <div class="rail-group" id="tools-sel" hidden>
+      <div class="dock-scroll" id="tools-sel" hidden>
         <span class="sel-tag" id="sel-label">Toque numa linha</span>
         <button class="rail-btn" id="btn-continue">Continuar</button>
         <span class="lv-group" id="lv-group">
@@ -160,7 +160,6 @@
         <button class="rail-btn rail-danger" id="btn-del-line">Apagar linha</button>
       </div>
     </div>
-    <div class="rail-hint">⌄</div>
   </div>
 
   <!-- SIGNATURE: leitura em fita métrica -->
@@ -504,7 +503,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.24</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.25</b></p>
   </div>
 </section>
 
