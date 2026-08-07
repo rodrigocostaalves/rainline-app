@@ -39,28 +39,169 @@
     if (name === 'quote') renderQuote();
     if (name === 'clients') renderClients();
     if (name === 'history') renderHistory();
-    if (name === 'settings') fillSettings();
+    if (name === 'settings') { fillSettings(); renderCloudCard(); }
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-go],[data-back],[data-action]');
     if (!b) return;
     if (b.dataset.go) go(b.dataset.go === 'job' ? (newJob(), 'job') : b.dataset.go);
     if (b.dataset.back) go(b.dataset.back);
-    if (b.dataset.action === 'logout') { save(K.sess, null); go('login'); }
+    if (b.dataset.action === 'logout') {
+      save(K.sess, null);
+      cloud.user = null;
+      Api.logout().catch(function () {});
+      go('login');
+    }
   });
 
   /* ---------- login ---------- */
   $('#form-login').addEventListener('submit', function (e) {
     e.preventDefault();
     var u = $('#login-user').value.trim(), p = $('#login-pass').value;
-    if (u === settings.user && p === settings.pass) {
-      save(K.sess, { user: u, at: Date.now() });
+    var hint = $('#login-hint');
+    hint.textContent = 'Entrando…';
+
+    Api.login(u, p).then(function (r) {
+      cloud.on = true; cloud.user = r.user;
+      save(K.sess, { user: r.user.username, at: Date.now(), cloud: true });
       $('#login-pass').value = '';
+      hint.textContent = '';
       go('home');
-    } else {
-      $('#login-hint').textContent = 'Usuário ou senha não conferem. Tente de novo.';
-    }
+      syncAll(true);
+    }).catch(function (err) {
+      if (err.code === 401) {
+        hint.textContent = 'Usuário ou senha não conferem.';
+        return;
+      }
+      // servidor fora do ar: permite trabalhar offline com a senha local
+      if (u === settings.user && p === settings.pass) {
+        cloud.on = false; cloud.user = null;
+        save(K.sess, { user: u, at: Date.now(), cloud: false });
+        $('#login-pass').value = '';
+        hint.textContent = '';
+        go('home');
+        toast('Sem servidor agora — trabalhando offline neste aparelho.');
+      } else {
+        hint.textContent = 'Sem conexão e a senha local não confere.';
+      }
+    });
   });
+
+  /* ---------- nuvem: login, sincronização e fotos ----------
+     O app funciona offline. Tudo é salvo no aparelho primeiro e sobe depois. */
+  var cloud = { on: null, user: null, lastSync: load('rainline.lastsync', 0) };
+
+  function setSync(state, text) {
+    var dot = $('#sync-dot'), t = $('#sync-text');
+    if (!dot) return;
+    dot.className = 'sync-dot ' + state;
+    t.textContent = text;
+  }
+
+  function pendingCount() {
+    return jobs.filter(function (j) { return j.pending; }).length;
+  }
+
+  function syncStatusText() {
+    var n = pendingCount();
+    if (cloud.on === false) return n ? n + ' orçamento(s) aguardando internet' : 'Modo offline — salvo no aparelho';
+    if (n) return n + ' orçamento(s) para enviar';
+    return cloud.user ? 'Tudo sincronizado · ' + cloud.user.username : 'Conectado';
+  }
+
+  function refreshSyncBar() {
+    var n = pendingCount();
+    setSync(cloud.on === false ? 'off' : (n ? 'pending' : 'on'), syncStatusText());
+  }
+
+  // sobe as fotos que ainda estão em base64 e troca pela chave do R2
+  function uploadPhotos(job) {
+    var pend = (job.manual || []).filter(function (e) { return e.img && !e.key; });
+    if (!pend.length || cloud.on === false) return Promise.resolve();
+    return pend.reduce(function (chain, e) {
+      return chain.then(function () {
+        return Api.uploadPhoto(job.id, e.img, e.level, e.feet).then(function (r) {
+          e.key = r.key;
+          delete e.img;             // libera a memória do aparelho
+        }).catch(function () {});
+      });
+    }, Promise.resolve());
+  }
+
+  function pushJob(job) {
+    if (cloud.on === false) return Promise.resolve(false);
+    return uploadPhotos(job).then(function () {
+      return Api.putJob(job.id, job, job.savedAt || 0);
+    }).then(function (r) {
+      job.pending = false;
+      job.syncedAt = r.updated_at;
+      save(K.jobs, jobs);
+      return true;
+    }).catch(function (err) {
+      if (err.code === 401) { cloud.user = null; }
+      else if (err.code === undefined) cloud.on = false;
+      return false;
+    });
+  }
+
+  function syncAll(quiet) {
+    if (cloud.on === false) { refreshSyncBar(); return Promise.resolve(); }
+    if (!quiet) setSync('pending', 'Sincronizando…');
+
+    var out = jobs.filter(function (j) { return j.pending; });
+    return out.reduce(function (chain, j) {
+      return chain.then(function () { return pushJob(j); });
+    }, Promise.resolve())
+      .then(function () { return Api.jobs(0); })
+      .then(function (r) {
+        (r.jobs || []).forEach(function (row) {
+          var i = jobs.findIndex(function (j) { return j.id === row.id; });
+          if (row.deleted) { if (i >= 0) jobs.splice(i, 1); return; }
+          var incoming = row.data;
+          if (!incoming) return;
+          incoming.id = row.id;
+          incoming.syncedAt = row.updated_at;
+          if (i < 0) jobs.push(incoming);
+          else if (!jobs[i].pending && (row.updated_at > (jobs[i].syncedAt || 0))) jobs[i] = incoming;
+        });
+        jobs.sort(function (a, b) { return (b.savedAt || 0) - (a.savedAt || 0); });
+        cloud.lastSync = r.now;
+        save('rainline.lastsync', r.now);
+        save(K.jobs, jobs);
+        refreshSyncBar();
+        renderHome();
+      })
+      .catch(function (err) {
+        if (err.code === undefined) cloud.on = false;
+        refreshSyncBar();
+      });
+  }
+
+  function bootCloud() {
+    return Api.me().then(function (r) {
+      cloud.on = true; cloud.user = r.user;
+      save(K.sess, { user: r.user.username, at: Date.now(), cloud: true });
+      refreshSyncBar();
+      return syncAll(true);
+    }).catch(function (err) {
+      cloud.on = (err.code === 401) ? true : false;   // 401 = servidor vivo, sessão expirada
+      cloud.user = null;
+      refreshSyncBar();
+    });
+  }
+
+  $('#btn-sync').addEventListener('click', function () {
+    cloud.on = null;
+    Api.health().then(function (ok) {
+      cloud.on = ok;
+      if (!ok) { refreshSyncBar(); toast('Sem conexão com o servidor agora.'); return; }
+      if (!cloud.user) { toast('Sessão expirada — entre de novo.'); go('login'); return; }
+      syncAll().then(function () { toast('Sincronizado.'); });
+    });
+  });
+
+  window.addEventListener('online', function () { cloud.on = null; bootCloud(); });
+  window.addEventListener('offline', function () { cloud.on = false; refreshSyncBar(); });
 
   /* ---------- dashboard ---------- */
   function renderHome() {
@@ -657,7 +798,9 @@
     var ph2 = '';
     (job.manual || []).forEach(function (e, i) {
       ph2 += '<div class="part-row">' +
-        (e.thumb ? '<img class="thumb" src="' + e.thumb + '" alt="" data-open-photo="' + i + '">' : '') +
+        (e.thumb || e.key
+          ? '<img class="thumb" src="' + (e.thumb || Api.photoUrl(e.key)) + '" alt="" data-open-photo="' + i + '">'
+          : '') +
         '<div class="part-main"><b>' + (e.note || 'Foto') + '</b>' +
         '<small>' + (e.corners || 0) + ' cantos · toque na foto para editar</small>' +
         lvMini('m', i, e.level) + '</div>' +
@@ -720,6 +863,7 @@
     edge: null,                     // mapa de bordas (Sobel) da imagem
     edgeCanvas: null,               // desenho das bordas para sobrepor
     snap: true,                     // encaixar o ponto na borda mais forte
+    unit: 'ft',                     // unidade da referência digitada
     showEdges: false
   };
 
@@ -830,7 +974,8 @@
       ph.ref = (e.ref || []).slice();
       ph.runs = (e.lines && e.lines.length) ? JSON.parse(JSON.stringify(e.lines)) : [[]];
       $('#ref-feet').value = e.refFeet || 16;
-      if (e.img) {
+      var srcImg = e.img || (e.key ? Api.photoUrl(e.key) : null);
+      if (srcImg) {
         var im = new Image();
         im.onload = function () {
           ph.img = im; ph.w = im.naturalWidth; ph.h = im.naturalHeight;
@@ -839,7 +984,7 @@
           $('#photo-empty').hidden = true;
           setPhotoStep('measure'); recalcPhoto();
         };
-        im.src = e.img;
+        im.src = srcImg;
       } else {
         $('#photo-empty').hidden = false;
         toast('A foto original não coube na memória do aparelho. Anexe de novo para editar.');
@@ -903,6 +1048,24 @@
     });
   });
   $('#ref-feet').addEventListener('input', recalcPhoto);
+
+  $$('#unit-sw .u-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('#unit-sw .u-btn').forEach(function (o) { o.classList.remove('is-on'); });
+      b.classList.add('is-on');
+      ph.unit = b.dataset.unit;
+      recalcPhoto();
+    });
+  });
+
+  $('#chip-ruler').addEventListener('click', function () {
+    $$('[data-ref]').forEach(function (o) { o.classList.remove('is-on'); });
+    $$('#unit-sw .u-btn').forEach(function (o) { o.classList.toggle('is-on', o.dataset.unit === 'm'); });
+    ph.unit = 'm';
+    $('#ref-feet').value = '';
+    $('#ref-feet').focus();
+    toast('Digite o número da régua e trace em cima dela, ponta a ponta.');
+  });
 
   $$('[data-plevel]').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -1111,8 +1274,13 @@
     return { feet: feet, corners: corners, lines: lines };
   }
 
+  function refFeetValue() {
+    var v = Number($('#ref-feet').value) || 0;
+    return ph.unit === 'm' ? v * 3.280839895 : v;
+  }
+
   function recalcPhoto() {
-    var rf = Number($('#ref-feet').value) || 0;
+    var rf = refFeetValue();
     if (ph.ref.length === 2 && rf > 0) {
       var px = pxLen(ph.ref[0], ph.ref[1]);
       ph.scale = px > 0 ? rf / px : 0;
@@ -1214,6 +1382,95 @@
     if (ph.showEdges && !ph.edgeCanvas) toast('Bordas não disponíveis para esta imagem.');
   });
 
+  /* --- alinhar a linha traçada com as bordas reais do telhado ---
+     Cada segmento é ajustado para a reta de maior "energia de borda" perto dele
+     (pequenas variações de ângulo e deslocamento). Depois os cantos viram a
+     interseção das retas vizinhas — que é como um canto de telhado se comporta. */
+  function edgeEnergy(a, b) {
+    if (!ph.edge) return 0;
+    var N = 48, sum = 0, hit = 0;
+    for (var i = 0; i <= N; i++) {
+      var t = i / N;
+      var x = Math.round((a.x + (b.x - a.x) * t) * ph.edge.sx);
+      var y = Math.round((a.y + (b.y - a.y) * t) * ph.edge.sy);
+      if (x < 0 || y < 0 || x >= ph.edge.w || y >= ph.edge.h) continue;
+      sum += ph.edge.mag[y * ph.edge.w + x];
+      hit++;
+    }
+    return hit ? sum / hit : 0;
+  }
+
+  function fitSegment(a, b) {
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var len = Math.hypot(dx, dy);
+    if (!len) return null;
+    var ang = Math.atan2(dy, dx);
+    var nx = -dy / len, ny = dx / len;            // normal do segmento
+    var step = 1 / (ph.edge ? ph.edge.sx : 1);    // 1 px do mapa de bordas
+    var best = { s: edgeEnergy(a, b), a: a, b: b };
+
+    for (var da = -4; da <= 4; da++) {
+      var th = ang + da * Math.PI / 180;
+      var ux = Math.cos(th), uy = Math.sin(th);
+      var cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      for (var off = -8; off <= 8; off++) {
+        var ox = cx + nx * off * step, oy = cy + ny * off * step;
+        var A = { x: ox - ux * len / 2, y: oy - uy * len / 2 };
+        var B = { x: ox + ux * len / 2, y: oy + uy * len / 2 };
+        var e = edgeEnergy(A, B);
+        if (e > best.s) best = { s: e, a: A, b: B };
+      }
+    }
+    return best;
+  }
+
+  function lineIntersect(p1, p2, p3, p4) {
+    var d = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
+    if (Math.abs(d) < 1e-6) return null;          // paralelas
+    var a = p1.x * p2.y - p1.y * p2.x, b = p3.x * p4.y - p3.y * p4.x;
+    return {
+      x: (a * (p3.x - p4.x) - (p1.x - p2.x) * b) / d,
+      y: (a * (p3.y - p4.y) - (p1.y - p2.y) * b) / d
+    };
+  }
+
+  function alignRun(run) {
+    if (!ph.edge || run.length < 2) return run;
+    var fits = [];
+    for (var i = 1; i < run.length; i++) {
+      var f = fitSegment(run[i - 1], run[i]);
+      fits.push(f ? { a: f.a, b: f.b } : { a: run[i - 1], b: run[i] });
+    }
+    var out = [{ x: fits[0].a.x, y: fits[0].a.y }];
+    for (var k = 1; k < fits.length; k++) {
+      var ip = lineIntersect(fits[k - 1].a, fits[k - 1].b, fits[k].a, fits[k].b);
+      var orig = run[k];
+      // se a interseção fugir demais, mantém o ponto original
+      if (!ip || Math.hypot(ip.x - orig.x, ip.y - orig.y) > 40 / (ph.fit.s || 1)) ip = orig;
+      out.push({ x: ip.x, y: ip.y });
+    }
+    var last = fits[fits.length - 1];
+    out.push({ x: last.b.x, y: last.b.y });
+    return out;
+  }
+
+  $('#btn-align').addEventListener('click', function () {
+    if (!ph.img) return;
+    if (!ph.edge) { toast('Sem mapa de bordas para esta imagem.'); return; }
+    var n = 0;
+    ph.runs = ph.runs.map(function (r) {
+      if (r.length < 2) return r;
+      n++;
+      return alignRun(r);
+    });
+    if (ph.ref.length === 2) {
+      var f = fitSegment(ph.ref[0], ph.ref[1]);
+      if (f) ph.ref = [f.a, f.b];
+    }
+    recalcPhoto();
+    toast(n ? 'Linhas encaixadas nas bordas. Confira antes de somar.' : 'Nada para alinhar ainda.');
+  });
+
   $('#btn-photo-undo').addEventListener('click', function () {
     if (ph.step === 'ref') { ph.ref.pop(); }
     else {
@@ -1249,7 +1506,7 @@
       corners: t.corners,
       level: ph.level,
       note: 'Foto ' + (levelName(ph.level)),
-      refFeet: Number($('#ref-feet').value) || 16,
+      refFeet: refFeetValue(),
       ref: ph.ref.slice(),
       lines: JSON.parse(JSON.stringify(ph.runs)),
       thumb: shrink(ph.img, 220, 0.6),
@@ -1350,10 +1607,15 @@
     var i = jobs.findIndex(function (j) { return j.id === job.id; });
     var copy = JSON.parse(JSON.stringify(job));
     delete copy._price; delete copy._list; delete copy._m;
+    copy.pending = true;
     if (i >= 0) jobs[i] = copy; else jobs.unshift(copy);
     try {
       localStorage.setItem(K.jobs, JSON.stringify(jobs));
       toast('Orçamento ' + job.id + ' salvo.');
+      pushJob(copy).then(function (ok) {
+        refreshSyncBar();
+        if (ok) toast('Enviado para a nuvem.');
+      });
     } catch (err) {
       (copy.manual || []).forEach(function (e) { delete e.img; });   // mantém só a miniatura
       try {
@@ -1489,8 +1751,10 @@
   // redesenha uma medição de foto com as marcações, para o PDF
   function photoImage(entry) {
     return new Promise(function (res) {
-      if (!entry.img) { res(entry.thumb || null); return; }
+      var src = entry.img || (entry.key ? Api.photoUrl(entry.key) : null);
+      if (!src) { res(entry.thumb || null); return; }
       var im = new Image();
+      im.crossOrigin = 'anonymous';
       im.onload = function () {
         var MAX = 1100;
         var s = Math.min(1, MAX / im.naturalWidth);
@@ -1544,7 +1808,7 @@
         try { res(cv.toDataURL('image/jpeg', 0.82)); } catch (e) { res(entry.thumb || null); }
       };
       im.onerror = function () { res(entry.thumb || null); };
-      im.src = entry.img;
+      im.src = src;
     });
   }
 
@@ -1730,6 +1994,53 @@
     settings.mode = e.target.dataset.mode; setMode(settings.mode);
   });
 
+  function renderCloudCard() {
+    var st = $('#cloud-status');
+    if (!st) return;
+    if (cloud.user) {
+      st.textContent = 'Conectado como ' + cloud.user.username +
+        (cloud.user.role === 'admin' ? ' (administrador)' : ' (vendedor)') + '.';
+      $('#admin-users').hidden = cloud.user.role !== 'admin';
+      if (cloud.user.role === 'admin') {
+        Api.users().then(function (r) {
+          $('#users-list').innerHTML = (r.users || []).map(function (u) {
+            return '<div class="user-row"><span>' + u.username + '<br><small>' +
+              (u.role === 'admin' ? 'administrador' : 'vendedor') + '</small></span>' +
+              '<small>' + (u.active ? 'ativo' : 'inativo') + '</small></div>';
+          }).join('');
+        }).catch(function () {});
+      }
+    } else {
+      st.textContent = cloud.on === false
+        ? 'Sem servidor agora. O app está salvando só neste aparelho.'
+        : 'Sessão encerrada — entre de novo para sincronizar.';
+      $('#admin-users').hidden = true;
+    }
+  }
+
+  $('#btn-pw').addEventListener('click', function () {
+    var cur = $('#pw-cur').value, nx = $('#pw-new').value;
+    if (nx.length < 4) { toast('A nova senha precisa de pelo menos 4 caracteres.'); return; }
+    Api.changePassword(cur, nx).then(function () {
+      $('#pw-cur').value = ''; $('#pw-new').value = '';
+      toast('Senha alterada.');
+    }).catch(function (err) {
+      toast(err.code === 401 ? 'Senha atual não confere.' : 'Não consegui trocar agora.');
+    });
+  });
+
+  $('#btn-new-user').addEventListener('click', function () {
+    var u = $('#nu-user').value.trim(), p = $('#nu-pass').value;
+    if (!u || p.length < 4) { toast('Informe usuário e senha de 4+ caracteres.'); return; }
+    Api.createUser({ username: u, password: p, role: 'seller' }).then(function () {
+      $('#nu-user').value = ''; $('#nu-pass').value = '';
+      toast('Vendedor criado.');
+      renderCloudCard();
+    }).catch(function (err) {
+      toast(err.code === 409 ? 'Esse usuário já existe.' : 'Não consegui criar agora.');
+    });
+  });
+
   $('#btn-save-settings').addEventListener('click', function () {
     Object.keys(SET_MAP).forEach(function (sel) {
       var k = SET_MAP[sel], v = $(sel).value;
@@ -1768,6 +2079,13 @@
 
   /* ---------- boot ---------- */
   if (load(K.sess, null)) go('home');
+  bootCloud();
+  Api.health().then(function (ok) {
+    var m = $('#login-mode');
+    if (m) m.textContent = ok
+      ? 'Conectado ao servidor — orçamentos salvos na nuvem.'
+      : 'Sem servidor agora — o app funciona offline neste aparelho.';
+  });
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
