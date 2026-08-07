@@ -476,7 +476,7 @@
     L.control.zoom({ position: 'topright' }).addTo(map);
     drawLayer = L.layerGroup().addTo(map);
     initLoupe();
-    var rail = document.getElementById('map-rail');
+    var rail = document.getElementById('map-dock');
     L.DomEvent.disableClickPropagation(rail);
     L.DomEvent.disableScrollPropagation(rail);
     ['touchstart', 'touchmove', 'pointerdown', 'pointermove', 'mousedown'].forEach(function (ev) {
@@ -693,11 +693,111 @@
     $('#loupe-tag').textContent = parts.join(' ft · ') + (parts.length ? ' ft' : '');
   }
 
+  /* ---------- detectar telhado na imagem de satélite ----------
+     Mesma matemática da foto: recorta o que está na tela, acha as bordas e as
+     retas, e devolve como candidatas. Você toca só nas águas que levam calha —
+     porque calha vai onde a água escorre, não em todo lado do telhado. */
+  var mapCands = [];
+  var candLayer = null;
+
+  function mapViewCanvas() {
+    var def = LAYERS[layerIdx];
+    if (def.type !== 'xyz') def = LAYERS[0];
+    var z = map.getZoom();
+    var nz = Math.min(Math.round(z), def.max);
+    var WS = 256 * Math.pow(2, nz);
+    var b = map.getBounds();
+    var x0 = lngToPx(b.getWest(), WS), x1 = lngToPx(b.getEast(), WS);
+    var y0 = latToPx(b.getNorth(), WS), y1 = latToPx(b.getSouth(), WS);
+    var tx0 = Math.floor(x0 / 256), tx1 = Math.floor(x1 / 256);
+    var ty0 = Math.floor(y0 / 256), ty1 = Math.floor(y1 / 256);
+    if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 36) return Promise.resolve(null);
+
+    var W = (tx1 - tx0 + 1) * 256, H = (ty1 - ty0 + 1) * 256;
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var g = cv.getContext('2d');
+    var jobs2 = [];
+    for (var tx = tx0; tx <= tx1; tx++) {
+      for (var ty = ty0; ty <= ty1; ty++) {
+        (function (tx, ty) {
+          var url = def.url.replace('{z}', nz).replace('{x}', tx).replace('{y}', ty);
+          jobs2.push(loadTile(url).then(function (im) {
+            if (im) g.drawImage(im, (tx - tx0) * 256, (ty - ty0) * 256, 256, 256);
+          }));
+        })(tx, ty);
+      }
+    }
+    return Promise.all(jobs2).then(function () {
+      return {
+        canvas: cv,
+        toLatLng: function (px, py) {
+          var wx = tx0 * 256 + px, wy = ty0 * 256 + py;
+          var lng = wx / WS * 360 - 180;
+          var n = Math.PI - 2 * Math.PI * wy / WS;
+          var lat = 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+          return { lat: lat, lng: lng };
+        }
+      };
+    });
+  }
+
+  function detectRoofImage() {
+    if (!map) return;
+    toast('Analisando a imagem do telhado…');
+    mapViewCanvas().then(function (v) {
+      if (!v) { toast('Aproxime um pouco o mapa e tente de novo.'); return; }
+      var edge = computeEdges(v.canvas, 1100);
+      if (!edge) { toast('Não consegui ler a imagem desta camada.'); return; }
+      var segs = houghSegments(edge, { relax: 1, onlyH: false, max: 30 });
+      if (segs.length < 4) segs = houghSegments(edge, { relax: 1.8, onlyH: false, max: 30 });
+      if (!segs.length) { detectRoof(); return; }         // sem retas: cai no contorno do OSM
+
+      mapCands = segs.map(function (s2) {
+        return [v.toLatLng(s2.a.x, s2.a.y), v.toLatLng(s2.b.x, s2.b.y)];
+      }).filter(function (ll) {
+        return Calc.haversineFt(ll[0], ll[1]) > 8;        // trecho curto não é calha
+      }).slice(0, 24);
+
+      drawCands();
+      toast(mapCands.length + ' linhas no telhado. Toque só nas águas que levam calha.');
+    }).catch(function () { toast('Não consegui analisar agora.'); });
+  }
+
+  function drawCands() {
+    if (!candLayer) candLayer = L.layerGroup().addTo(map);
+    candLayer.clearLayers();
+    mapCands.forEach(function (ll, i) {
+      var line = L.polyline([[ll[0].lat, ll[0].lng], [ll[1].lat, ll[1].lng]], {
+        color: '#2BE0C0', weight: 5, opacity: .95, dashArray: '10 7', interactive: true
+      }).addTo(candLayer);
+      line.on('click', function (ev) {
+        L.DomEvent.stop(ev);
+        var last = job.runs[job.runs.length - 1];
+        if (last && last.points.length) job.runs.push({ points: [], level: 1 });
+        if (!job.runs.length) job.runs.push({ points: [], level: 1 });
+        job.runs[job.runs.length - 1].points = [
+          { lat: ll[0].lat, lng: ll[0].lng }, { lat: ll[1].lat, lng: ll[1].lng }
+        ];
+        job.runs.push({ points: [], level: 1 });
+        mapCands.splice(i, 1);
+        drawCands(); renderDraw();
+        toast('Linha aceita.');
+      });
+    });
+  }
+
+  function clearCands() {
+    mapCands = [];
+    if (candLayer) candLayer.clearLayers();
+  }
+
   /* ---------- botões do mapa ---------- */
   $$('[data-mapmode]').forEach(function (b) {
     b.addEventListener('click', function () { setMapMode(b.dataset.mapmode); });
   });
-  $('#btn-detect').addEventListener('click', detectRoof);
+  $('#btn-detect').addEventListener('click', detectRoofImage);
+  $('#btn-detect-osm').addEventListener('click', detectRoof);
   $('#btn-undo').addEventListener('click', function () {
     if (!job || !job.runs.length) return;
     var i = (selected != null && job.runs[selected]) ? selected : job.runs.length - 1;
@@ -717,7 +817,7 @@
   });
   $('#btn-clear').addEventListener('click', function () {
     if (!job) return;
-    job.runs = []; selected = null; renderDraw();
+    job.runs = []; selected = null; clearCands(); renderDraw();
   });
   $('#btn-continue').addEventListener('click', function () {
     if (selected == null) { toast('Selecione uma linha primeiro.'); return; }
@@ -762,12 +862,6 @@
     var on = document.body.classList.toggle('tiles-boost');
     $('#btn-enhance').classList.toggle('is-on', on);
     toast(on ? 'Contraste reforçado.' : 'Imagem original.');
-  });
-
-  $('#rail-toggle').addEventListener('click', function () {
-    var r = $('#map-rail');
-    var closed = r.classList.toggle('is-closed');
-    $('#rail-toggle').textContent = closed ? '‹' : '›';
   });
 
   $('#btn-relocate').addEventListener('click', useGps);
@@ -935,17 +1029,19 @@
      Não é reconhecimento de objeto. É matemática de contraste: onde a cor muda
      bruscamente, há uma aresta. Serve para o ponto grudar na linha do telhado
      em vez de ficar 3 px torto. */
-  function buildEdges(img) {
-    var MAX = 900;
-    var sc = Math.min(1, MAX / img.naturalWidth);
-    var w = Math.max(1, Math.round(img.naturalWidth * sc));
-    var h = Math.max(1, Math.round(img.naturalHeight * sc));
+  function buildEdges(img) { ph.edge = computeEdges(img, 900); ph.edgeCanvas = ph.edge.overlay; }
+
+  function computeEdges(img, MAX) {
+    var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    var sc = Math.min(1, MAX / iw);
+    var w = Math.max(1, Math.round(iw * sc));
+    var h = Math.max(1, Math.round(ih * sc));
     var c = document.createElement('canvas');
     c.width = w; c.height = h;
     var g = c.getContext('2d', { willReadFrequently: true });
     g.drawImage(img, 0, 0, w, h);
     var src;
-    try { src = g.getImageData(0, 0, w, h).data; } catch (e) { ph.edge = null; return; }
+    try { src = g.getImageData(0, 0, w, h).data; } catch (e) { return null; }
 
     var gray = new Float32Array(w * h);
     for (var i = 0, j = 0; i < src.length; i += 4, j++) {
@@ -1027,8 +1123,7 @@
     }
     cut = Math.max(22, Math.min(120, cut));
 
-    ph.edge = { w: w, h: h, mag: mag, ang: ang, cut: cut,
-                sx: w / img.naturalWidth, sy: h / img.naturalHeight };
+    var edge = { w: w, h: h, mag: mag, ang: ang, cut: cut, sx: w / iw, sy: h / ih };
 
     // camada visual das bordas
     var TH = Math.max(18, cut - 10);
@@ -1054,7 +1149,8 @@
       id.data[r + 3] = thick[q] > TH ? 255 : 0;
     }
     og.putImageData(id, 0, 0);
-    ph.edgeCanvas = oc;
+    edge.overlay = oc;
+    return edge;
   }
 
   // puxa o ponto para a borda mais forte por perto
@@ -1801,11 +1897,13 @@
      Depois recortamos os trechos onde a borda existe de fato. */
   var candidates = [];
 
-  function detectLines(relax) {
-    if (!ph.edge) return [];
-    var RELAX = relax || 1;
-    var W = ph.edge.w, H = ph.edge.h, mag = ph.edge.mag;
-    var TH = Math.max(14, Math.round(ph.edge.cut / RELAX));
+  // Hough genérico: recebe o mapa de bordas e devolve trechos de reta
+  function houghSegments(edge, opt) {
+    if (!edge) return [];
+    opt = opt || {};
+    var RELAX = opt.relax || 1;
+    var W = edge.w, H = edge.h, mag = edge.mag;
+    var TH = Math.max(14, Math.round(edge.cut / RELAX));
     var NT = 180;                                   // 1 grau por passo
     var rhoMax = Math.ceil(Math.hypot(W, H));
     var NR = Math.ceil(2 * rhoMax / 2);             // 2 px por passo
@@ -1850,7 +1948,7 @@
 
     // calha numa foto de fachada é quase horizontal; a perspectiva inclina um
     // pouco, mas nunca vira vertical. Isso corta mato, tronco e cerca.
-    if (ph.onlyH) {
+    if (opt.onlyH) {
       peaks = peaks.filter(function (pk) {
         var lineDeg = ((pk.t * 180 / NT) + 90) % 180;      // direção da reta
         return lineDeg <= 32 || lineDeg >= 148;
@@ -1885,8 +1983,8 @@
         var len = f.b - f.a;
         if (len < Math.min(W, H) * 0.07 / RELAX) return;   // trecho curto: descarta
         segs.push({
-          a: { x: (x0 + dx * f.a) / ph.edge.sx, y: (y0 + dy * f.a) / ph.edge.sy },
-          b: { x: (x0 + dx * f.b) / ph.edge.sx, y: (y0 + dy * f.b) / ph.edge.sy },
+          a: { x: (x0 + dx * f.a) / edge.sx, y: (y0 + dy * f.a) / edge.sy },
+          b: { x: (x0 + dx * f.b) / edge.sx, y: (y0 + dy * f.b) / edge.sy },
           len: len
         });
       });
@@ -1897,12 +1995,17 @@
     var out = [];
     segs.forEach(function (s2) {
       var dup = out.some(function (o) {
-        return (dist(o.a, s2.a) + dist(o.b, s2.b)) / 2 < 14 / (ph.edge.sx || 1) ||
-               (dist(o.a, s2.b) + dist(o.b, s2.a)) / 2 < 14 / (ph.edge.sx || 1);
+        return (dist(o.a, s2.a) + dist(o.b, s2.b)) / 2 < 14 / (edge.sx || 1) ||
+               (dist(o.a, s2.b) + dist(o.b, s2.a)) / 2 < 14 / (edge.sx || 1);
       });
       if (!dup) out.push(s2);
     });
-    return out.slice(0, 12);
+    return out.slice(0, opt.max || 12);
+  }
+
+
+  function detectLines(relax) {
+    return houghSegments(ph.edge, { relax: relax || 1, onlyH: ph.onlyH, max: 12 });
   }
 
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
