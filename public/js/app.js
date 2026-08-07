@@ -994,6 +994,7 @@
       o.classList.toggle('is-on', +o.dataset.plevel === ph.level);
     });
     go('photo');
+    setBarMin(false);
     setTimeout(function () { recalcPhoto(); }, 80);
   }
 
@@ -1030,7 +1031,21 @@
     ph.step = s;
     $$('[data-pstep]').forEach(function (b) { b.classList.toggle('is-on', b.dataset.pstep === s); });
     $('#ref-row').style.opacity = s === 'ref' ? '1' : '.5';
+    // definida a escala, as opções de referência não servem mais: some com elas
+    if (s === 'measure') setBarMin(true);
   }
+
+  function setBarMin(min) {
+    var bar = $('#photo-bar');
+    if (!bar) return;
+    bar.classList.toggle('is-min', !!min);
+    $('#bar-label').textContent = min ? 'mostrar opções' : 'esconder opções';
+    setTimeout(function () { if (ph.img) { clampView(); drawPhoto(); } }, 60);
+  }
+
+  $('#bar-toggle').addEventListener('click', function () {
+    setBarMin(!$('#photo-bar').classList.contains('is-min'));
+  });
   $$('[data-pstep]').forEach(function (b) {
     b.addEventListener('click', function () {
       if (b.dataset.pstep === 'measure' && !ph.scale) { toast('Trace a referência primeiro.'); return; }
