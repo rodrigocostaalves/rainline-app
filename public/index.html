@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.17</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.18</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -227,7 +227,11 @@
   <input type="file" id="photo-file" accept="image/*" hidden>
   <input type="file" id="photo-cam" accept="image/*" capture="environment" hidden>
 
-  <div class="photo-bar">
+  <div class="photo-bar" id="photo-bar">
+    <button class="bar-toggle" id="bar-toggle" aria-label="Mostrar ou esconder opções">
+      <span class="bar-grip"></span>
+      <span class="bar-label" id="bar-label">esconder opções</span>
+    </button>
     <div class="photo-steps">
       <button class="pstep is-on" data-pstep="ref">1 · Referência</button>
       <button class="pstep" data-pstep="measure">2 · Beirais</button>
@@ -452,7 +456,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.17</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.18</b></p>
   </div>
 </section>
 
