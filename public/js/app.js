@@ -1016,6 +1016,7 @@
       ph.img = img; ph.w = img.naturalWidth; ph.h = img.naturalHeight;
       ph.ref = []; ph.runs = [[]]; ph.scale = 0; ph.step = 'ref';
       ph.view = { z: 1, ox: 0, oy: 0 };
+      candidates = [];
       buildEdges(img);
       setPhotoStep('ref');
       $('#photo-empty').hidden = true;
@@ -1208,6 +1209,7 @@
     function addPhotoPoint(cx, cy) {
       var p = toImg(cx, cy);
       if (p.x < 0 || p.y < 0 || p.x > ph.w || p.y > ph.h) return;
+      if (ph.step === 'measure' && acceptCandidate(p)) return;
       p = snapToEdge(p);
       if (ph.step === 'ref') {
         if (ph.ref.length >= 2) ph.ref = [];
@@ -1351,6 +1353,19 @@
       });
     }
 
+    // candidatas da detecção automática: tracejado ciano
+    if (candidates && candidates.length) {
+      g.save();
+      g.setLineDash([9, 6]);
+      g.strokeStyle = 'rgba(43,224,192,.95)';
+      g.lineWidth = 3;
+      candidates.forEach(function (c) {
+        var A = P(c.a), B = P(c.b);
+        g.beginPath(); g.moveTo(A[0], A[1]); g.lineTo(B[0], B[1]); g.stroke();
+      });
+      g.restore();
+    }
+
     // beirais em amarelo, com a medida de cada trecho
     ph.runs.forEach(function (r) {
       if (r.length > 1) {
@@ -1486,6 +1501,150 @@
     toast(n ? 'Linhas encaixadas nas bordas. Confira antes de somar.' : 'Nada para alinhar ainda.');
   });
 
+  /* ---------- detecção automática de linhas (transformada de Hough) ----------
+     Sem IA e sem servidor: puro cálculo. Cada pixel de borda "vota" em todas as
+     retas que passam por ele; as retas mais votadas são as linhas reais da foto.
+     Depois recortamos os trechos onde a borda existe de fato. */
+  var candidates = [];
+
+  function detectLines() {
+    if (!ph.edge) return [];
+    var W = ph.edge.w, H = ph.edge.h, mag = ph.edge.mag;
+    var TH = 70;
+    var NT = 180;                                   // 1 grau por passo
+    var rhoMax = Math.ceil(Math.hypot(W, H));
+    var NR = Math.ceil(2 * rhoMax / 2);             // 2 px por passo
+    var acc = new Uint16Array(NT * NR);
+    var cos = new Float32Array(NT), sin = new Float32Array(NT);
+    for (var t = 0; t < NT; t++) {
+      var a = t * Math.PI / NT;
+      cos[t] = Math.cos(a); sin[t] = Math.sin(a);
+    }
+
+    var step = (W * H > 400000) ? 2 : 1;            // imagem grande: amostra
+    for (var y = 1; y < H - 1; y += step) {
+      for (var x = 1; x < W - 1; x += step) {
+        if (mag[y * W + x] < TH) continue;
+        for (var t2 = 0; t2 < NT; t2++) {
+          var r = Math.round((x * cos[t2] + y * sin[t2] + rhoMax) / 2);
+          if (r >= 0 && r < NR) acc[t2 * NR + r]++;
+        }
+      }
+    }
+
+    // picos: máximos locais acima de um mínimo
+    var minVotes = Math.max(28, Math.round(Math.min(W, H) * 0.10 / step));
+    var peaks = [];
+    for (var ti = 0; ti < NT; ti++) {
+      for (var ri = 1; ri < NR - 1; ri++) {
+        var v = acc[ti * NR + ri];
+        if (v < minVotes) continue;
+        var isPeak = true;
+        for (var dt = -2; dt <= 2 && isPeak; dt++) {
+          for (var dr = -3; dr <= 3; dr++) {
+            var tt = (ti + dt + NT) % NT, rr = ri + dr;
+            if (rr < 0 || rr >= NR) continue;
+            if (acc[tt * NR + rr] > v) { isPeak = false; break; }
+          }
+        }
+        if (isPeak) peaks.push({ t: ti, r: ri, v: v });
+      }
+    }
+    peaks.sort(function (a, b) { return b.v - a.v; });
+    peaks = peaks.slice(0, 26);
+
+    // de cada reta, extrai os trechos onde existe borda de verdade
+    var segs = [];
+    peaks.forEach(function (pk) {
+      var ang = pk.t * Math.PI / NT;
+      var c = Math.cos(ang), s = Math.sin(ang);
+      var rho = pk.r * 2 - rhoMax;
+      var dx = -s, dy = c;                          // direção ao longo da reta
+      var x0 = c * rho, y0 = s * rho;
+      var run = null, gap = 0, found = [];
+      var L = Math.hypot(W, H);
+      for (var u = -L; u <= L; u++) {
+        var x = Math.round(x0 + dx * u), y = Math.round(y0 + dy * u);
+        if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) { continue; }
+        var on = mag[y * W + x] >= TH ||
+                 mag[y * W + x + 1] >= TH || mag[y * W + x - 1] >= TH ||
+                 mag[(y + 1) * W + x] >= TH || mag[(y - 1) * W + x] >= TH;
+        if (on) {
+          if (!run) run = { a: u, b: u };
+          run.b = u; gap = 0;
+        } else if (run) {
+          if (++gap > 10) { found.push(run); run = null; }
+        }
+      }
+      if (run) found.push(run);
+      found.forEach(function (f) {
+        var len = f.b - f.a;
+        if (len < Math.min(W, H) * 0.12) return;    // trecho curto: descarta
+        segs.push({
+          a: { x: (x0 + dx * f.a) / ph.edge.sx, y: (y0 + dy * f.a) / ph.edge.sy },
+          b: { x: (x0 + dx * f.b) / ph.edge.sx, y: (y0 + dy * f.b) / ph.edge.sy },
+          len: len
+        });
+      });
+    });
+
+    segs.sort(function (a, b) { return b.len - a.len; });
+    // remove quase-duplicatas
+    var out = [];
+    segs.forEach(function (s2) {
+      var dup = out.some(function (o) {
+        return (dist(o.a, s2.a) + dist(o.b, s2.b)) / 2 < 14 / (ph.edge.sx || 1) ||
+               (dist(o.a, s2.b) + dist(o.b, s2.a)) / 2 < 14 / (ph.edge.sx || 1);
+      });
+      if (!dup) out.push(s2);
+    });
+    return out.slice(0, 14);
+  }
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  $('#btn-detect-lines').addEventListener('click', function () {
+    if (!ph.img) { toast('Carregue uma imagem primeiro.'); return; }
+    if (!ph.edge) { toast('Sem mapa de bordas para esta imagem.'); return; }
+    toast('Procurando as linhas…');
+    setTimeout(function () {
+      candidates = detectLines();
+      recalcPhoto();
+      toast(candidates.length
+        ? candidates.length + ' linhas encontradas. Toque nas que são calha.'
+        : 'Não achei linhas nítidas. Tente com Bordas ligado para conferir a foto.');
+    }, 40);
+  });
+
+  // toque numa candidata converte ela em linha de medição
+  function acceptCandidate(p) {
+    if (!candidates.length) return false;
+    var tol = 18 / ph.fit.s;
+    var best = null, bd = tol;
+    candidates.forEach(function (c, i) {
+      var d = pointToSegment(p, c.a, c.b);
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best === null) return false;
+    var c = candidates[best];
+    var last = ph.runs[ph.runs.length - 1];
+    if (last.length) ph.runs.push([]);
+    ph.runs[ph.runs.length - 1] = [{ x: c.a.x, y: c.a.y }, { x: c.b.x, y: c.b.y }];
+    ph.runs.push([]);
+    candidates.splice(best, 1);
+    recalcPhoto();
+    toast('Linha aceita.');
+    return true;
+  }
+
+  function pointToSegment(p, a, b) {
+    var vx = b.x - a.x, vy = b.y - a.y;
+    var L2 = vx * vx + vy * vy;
+    if (!L2) return dist(p, a);
+    var t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / L2));
+    return dist(p, { x: a.x + vx * t, y: a.y + vy * t });
+  }
+
   $('#btn-photo-undo').addEventListener('click', function () {
     if (ph.step === 'ref') { ph.ref.pop(); }
     else {
@@ -1494,6 +1653,10 @@
       if (!last.length && ph.runs.length > 1) ph.runs.pop();
     }
     recalcPhoto();
+  });
+
+  $('#btn-photo-clear-cand') && $('#btn-photo-clear-cand').addEventListener('click', function () {
+    candidates = []; recalcPhoto();
   });
 
   $('#btn-photo-newline').addEventListener('click', function () {
