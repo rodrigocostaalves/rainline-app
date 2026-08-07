@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.23</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.24</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -248,6 +248,7 @@
     <div class="photo-steps">
       <button class="pstep is-on" data-pstep="ref">1 · Referência</button>
       <button class="pstep" data-pstep="measure">2 · Beirais</button>
+      <button class="pstep pstep-ds" data-pstep="down">3 · Descidas</button>
     </div>
 
     <div class="zoom-pad">
@@ -266,7 +267,8 @@
       <button id="btn-onlyh" class="zfit is-on">Só horizontais</button>
     </div>
 
-    <div class="ref-row" id="ref-row">
+    <button class="ref-open" id="ref-open">Referência de escala: <b id="ref-current">garagem dupla 16 ft</b> ▾</button>
+    <div class="ref-row" id="ref-row" hidden>
       <button class="ref-chip" data-ref="16">Garagem dupla 16'</button>
       <button class="ref-chip" data-ref="9">Garagem simples 9'</button>
       <button class="ref-chip" data-ref="3">Porta 3'</button>
@@ -291,12 +293,9 @@
       <button class="btn btn-ghost" id="btn-photo-newline">Nova linha</button>
       <button class="btn btn-primary" id="btn-photo-add">Somar ao orçamento</button>
     </div>
-    <div class="ref-row" style="margin:10px 0 0">
-      <span style="font-size:12px;color:#8E9AA3">Nível:</span>
-      <button class="ref-chip is-on" data-plevel="1">Térreo</button>
-      <button class="ref-chip" data-plevel="2">2º andar</button>
-      <button class="ref-chip" data-plevel="3">3º</button>
+    <div class="ref-row ref-row-side" style="margin:10px 0 0">
       <span style="font-size:12px;color:#8E9AA3;width:100%">Lado da casa:</span>
+      <button class="ref-chip" data-side="toda">Casa inteira</button>
       <button class="ref-chip is-on" data-side="frente">Frente</button>
       <button class="ref-chip" data-side="direita">Direita</button>
       <button class="ref-chip" data-side="fundo">Fundo</button>
@@ -351,6 +350,12 @@
         <button class="st-btn" data-status="sent">Em análise</button>
         <button class="st-btn" data-status="accepted">Fechado</button>
         <button class="st-btn" data-status="lost">Recusado</button>
+      </div>
+      <span class="field-label" style="margin-top:14px">Margem neste orçamento</span>
+      <div class="status-row" id="margin-row">
+        <button class="st-btn" data-margin="none">Nenhuma</button>
+        <button class="st-btn" data-margin="value">Valor</button>
+        <button class="st-btn" data-margin="pct">Percentual</button>
       </div>
       <div class="quick-row">
         <button class="qk" data-qk="client">Editar cliente</button>
@@ -448,6 +453,11 @@
         </div>
       </div>
       <label class="field"><span>Valor mínimo do serviço ($)</span><input type="number" id="p-min" step="10" inputmode="decimal"></label>
+      <div class="row-2">
+        <label class="field"><span>Minha margem ($)</span><input type="number" id="p-mval" step="25" inputmode="decimal"></label>
+        <label class="field"><span>Minha margem (%)</span><input type="number" id="p-mpct" step="1" inputmode="decimal"></label>
+      </div>
+      <p class="hint">Ficam guardadas as duas. Na tela do orçamento você escolhe qual aplicar naquele trabalho — ou nenhuma.</p>
     </div>
 
     <h3 class="section-title">Regras de cálculo</h3>
@@ -494,7 +504,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.23</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.24</b></p>
   </div>
 </section>
 
