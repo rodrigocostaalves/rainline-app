@@ -265,6 +265,12 @@ input:focus,select:focus,textarea:focus{
   width:56px;height:56px;border-radius:10px;object-fit:cover;
   border:1px solid var(--line);flex:0 0 56px;background:var(--coil);
 }
+.sides-check{display:flex;gap:7px;flex-wrap:wrap}
+.side-chip{
+  border:1px dashed var(--line);border-radius:999px;padding:7px 12px;font-size:12.5px;
+  font-weight:700;color:var(--ink-3);background:var(--alum);
+}
+.side-chip.ok{border-style:solid;background:var(--patina);color:#fff;border-color:var(--patina)}
 .part-row{
   display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--coil);
 }
