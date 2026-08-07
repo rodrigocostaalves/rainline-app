@@ -209,7 +209,10 @@
     var now = new Date(), n = 0, v = 0;
     jobs.forEach(function (j) {
       var d = new Date(j.savedAt);
-      if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) { n++; v += j.total || 0; }
+      if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) {
+        n++;
+        if (j.status === 'accepted') v += j.total || 0;
+      }
     });
     $('#stat-month').textContent = n;
     $('#stat-value').textContent = '$' + Math.round(v).toLocaleString('en-US');
@@ -219,7 +222,7 @@
   function newJob() {
     job = {
       id: 'Q' + Date.now().toString(36).toUpperCase(),
-      client: {}, runs: [], manual: [], overrides: {},
+      client: {}, runs: [], manual: [], overrides: {}, status: 'draft',
       size: 5, stories: 1, color: '', discount: 0, taxPct: 0, savedAt: null
     };
     $('#form-job').reset();
@@ -239,6 +242,12 @@
       notes: $('#job-notes').value.trim()
     };
     $('#map-title').textContent = job.client.name || 'Medir calhas';
+    if (job.savedAt) {                    // edição de um orçamento já salvo
+      saveJob(true);
+      go('quote');
+      toast('Dados do cliente atualizados.');
+      return;
+    }
     go('map');
     initMap();
     if (!map) return;
@@ -994,7 +1003,8 @@
       o.classList.toggle('is-on', +o.dataset.plevel === ph.level);
     });
     go('photo');
-    setBarMin(false);
+    setBarMin(true);
+    setFull(false);
     setTimeout(function () { recalcPhoto(); }, 80);
   }
 
@@ -1047,6 +1057,15 @@
   $('#bar-toggle').addEventListener('click', function () {
     setBarMin(!$('#photo-bar').classList.contains('is-min'));
   });
+
+  function setFull(on) {
+    $('#screen-photo').classList.toggle('is-full', !!on);
+    setTimeout(function () { if (ph.img) { clampView(); drawPhoto(); } }, 60);
+  }
+  $('#btn-full').addEventListener('click', function () { setFull(true); });
+  $('#ph-exit-full').addEventListener('click', function () { setFull(false); });
+  $('#ph-undo2').addEventListener('click', function () { $('#btn-photo-undo').click(); });
+  $('#ph-newline2').addEventListener('click', function () { $('#btn-photo-newline').click(); });
   $$('[data-pstep]').forEach(function (b) {
     b.addEventListener('click', function () {
       if (b.dataset.pstep === 'measure' && !ph.scale) { toast('Trace a referência primeiro.'); return; }
@@ -1180,6 +1199,7 @@
         p = snapToEdge(p);
         if (ph.drag.kind === 'ref') ph.ref[ph.drag.i] = p;
         else ph.runs[ph.drag.ri][ph.drag.pi] = p;
+        showPhLoupe(p);
         recalcPhoto();
       } else if (moved) {                        // arrastando a foto
         ph.view.ox = panFrom.ox + dx;
@@ -1195,6 +1215,7 @@
       delete pts[e.pointerId];
       if (ids().length === 0) {
         ph.drag = null;
+        hidePhLoupe();
         if (!wasMoved && !wasDrag && ph.img) addPhotoPoint(e.clientX, e.clientY);
       }
       if (ids().length === 1) {                  // soltou um dedo da pinça
@@ -1305,6 +1326,8 @@
     var t = photoFeet();
     showZoom();
     $('#photo-total').textContent = Math.round(t.feet);
+    var ff = $('#ph-float-ft');
+    if (ff) ff.textContent = Math.round(t.feet);
     $('#photo-scale').textContent = ph.scale
       ? 'escala ok · ' + t.lines + ' linha(s)'
       : 'sem escala ainda';
@@ -1411,6 +1434,53 @@
     drawPhoto();
     if (ph.showEdges && !ph.edgeCanvas) toast('Bordas não disponíveis para esta imagem.');
   });
+
+  /* --- lupa da foto: aparece ao arrastar um ponto --- */
+  function showPhLoupe(p) {
+    var el = document.getElementById('ph-loupe');
+    if (!el || !ph.img) return;
+    el.classList.add('is-on');
+    var g = el.getContext('2d');
+    var S = 336;                       // resolução interna (2x para ficar nítida)
+    var Z = 3.2;                       // aumento sobre o zoom atual
+    var scale = ph.fit.s * Z * 2;      // px de tela por px de imagem
+    var half = S / (2 * scale);        // metade da janela, em px de imagem
+
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = '#22303A'; g.fillRect(0, 0, S, S);
+    g.imageSmoothingEnabled = scale < 3;
+    g.drawImage(ph.img, p.x - half, p.y - half, half * 2, half * 2, 0, 0, S, S);
+
+    function L(q) { return [(q.x - p.x) * scale + S / 2, (q.y - p.y) * scale + S / 2]; }
+
+    // linhas já traçadas, para conferir o alinhamento
+    g.lineCap = 'round';
+    ph.runs.forEach(function (r) {
+      if (r.length < 2) return;
+      g.strokeStyle = '#FFC91B'; g.lineWidth = 5;
+      g.beginPath();
+      r.forEach(function (q, i) { var a = L(q); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); });
+      g.stroke();
+    });
+    if (ph.ref.length === 2) {
+      g.strokeStyle = '#2BE0C0'; g.lineWidth = 5;
+      g.beginPath();
+      ph.ref.forEach(function (q, i) { var a = L(q); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); });
+      g.stroke();
+    }
+
+    // mira
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(S / 2 - 26, S / 2); g.lineTo(S / 2 + 26, S / 2);
+    g.moveTo(S / 2, S / 2 - 26); g.lineTo(S / 2, S / 2 + 26);
+    g.stroke();
+  }
+
+  function hidePhLoupe() {
+    var el = document.getElementById('ph-loupe');
+    if (el) el.classList.remove('is-on');
+  }
 
   /* --- alinhar a linha traçada com as bordas reais do telhado ---
      Cada segmento é ajustado para a reta de maior "energia de borda" perto dele
@@ -1533,7 +1603,7 @@
     }
 
     // picos: máximos locais acima de um mínimo
-    var minVotes = Math.max(28, Math.round(Math.min(W, H) * 0.10 / step));
+    var minVotes = Math.max(18, Math.round(Math.min(W, H) * 0.055 / step));
     var peaks = [];
     for (var ti = 0; ti < NT; ti++) {
       for (var ri = 1; ri < NR - 1; ri++) {
@@ -1551,7 +1621,7 @@
       }
     }
     peaks.sort(function (a, b) { return b.v - a.v; });
-    peaks = peaks.slice(0, 26);
+    peaks = peaks.slice(0, 60);
 
     // de cada reta, extrai os trechos onde existe borda de verdade
     var segs = [];
@@ -1579,7 +1649,7 @@
       if (run) found.push(run);
       found.forEach(function (f) {
         var len = f.b - f.a;
-        if (len < Math.min(W, H) * 0.12) return;    // trecho curto: descarta
+        if (len < Math.min(W, H) * 0.07) return;    // trecho curto: descarta
         segs.push({
           a: { x: (x0 + dx * f.a) / ph.edge.sx, y: (y0 + dy * f.a) / ph.edge.sy },
           b: { x: (x0 + dx * f.b) / ph.edge.sx, y: (y0 + dy * f.b) / ph.edge.sy },
@@ -1598,7 +1668,7 @@
       });
       if (!dup) out.push(s2);
     });
-    return out.slice(0, 14);
+    return out.slice(0, 22);
   }
 
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -1606,6 +1676,10 @@
   $('#btn-detect-lines').addEventListener('click', function () {
     if (!ph.img) { toast('Carregue uma imagem primeiro.'); return; }
     if (!ph.edge) { toast('Sem mapa de bordas para esta imagem.'); return; }
+    if (ph.step === 'ref') {
+      toast('Defina a referência antes — sem escala a linha não vira medida.');
+      return;
+    }
     toast('Procurando as linhas…');
     setTimeout(function () {
       candidates = detectLines();
@@ -1745,9 +1819,85 @@
   $('#btn-recalc').addEventListener('click', function () { job.overrides = {}; renderMaterials(); toast('Quantidades voltaram ao padrão.'); });
   $('#btn-to-quote').addEventListener('click', function () { go('quote'); });
 
+  /* ---------- situação comercial e reabertura ---------- */
+  var ST = {
+    draft:    { label: 'Rascunho',   cls: 'st-draft' },
+    sent:     { label: 'Em análise', cls: 'st-sent' },
+    accepted: { label: 'Fechado',    cls: 'st-accepted' },
+    lost:     { label: 'Recusado',   cls: 'st-lost' }
+  };
+
+  function setStatus(st) {
+    job.status = st;
+    $$('#status-row .st-btn').forEach(function (b) {
+      b.classList.toggle('is-on', b.dataset.status === st);
+    });
+  }
+
+  $$('#status-row .st-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      setStatus(b.dataset.status);
+      if (job.savedAt) {                       // já existe: grava a mudança na hora
+        saveJob(true);
+        toast('Marcado como ' + ST[job.status].label + '.');
+      }
+    });
+  });
+
+  $$('[data-qk]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var k = b.dataset.qk;
+      if (k === 'client') { fillJobForm(); go('job'); }
+      if (k === 'materials') go('materials');
+      if (k === 'map') reviewMap();
+    });
+  });
+
+  function fillJobForm() {
+    var c = job.client || {};
+    $('#job-name').value = c.name || '';
+    $('#job-phone').value = c.phone || '';
+    $('#job-email').value = c.email || '';
+    $('#job-address').value = c.address || '';
+    $('#job-city').value = c.city || '';
+    $('#job-state').value = c.state || '';
+    $('#job-zip').value = c.zip || '';
+    $('#job-notes').value = c.notes || '';
+    $('#btn-job-submit').textContent = job.savedAt ? 'Salvar dados do cliente' : 'Buscar imóvel';
+  }
+
+  // reabre o mapa já enquadrado nas linhas que existem
+  function reviewMap() {
+    go('map');
+    initMap();
+    updateTape();
+    if (!map) return;
+    setMapMode('draw');
+    var pts = [];
+    job.runs.forEach(function (r) { r.points.forEach(function (p) { pts.push([p.lat, p.lng]); }); });
+    setTimeout(function () {
+      map.invalidateSize();
+      if (pts.length > 1) map.fitBounds(L.latLngBounds(pts).pad(0.35), { maxZoom: 21 });
+      else if (job.center) map.setView([job.center.lat, job.center.lng], 20);
+      renderDraw();
+    }, 80);
+  }
+
+  $('#btn-delete-job').addEventListener('click', function () {
+    if (!job.savedAt) { toast('Este orçamento ainda não foi salvo.'); return; }
+    if (!confirm('Excluir o orçamento de ' + (job.client.name || 'sem nome') + '? Não dá para desfazer.')) return;
+    var i = jobs.findIndex(function (j) { return j.id === job.id; });
+    if (i >= 0) { jobs.splice(i, 1); save(K.jobs, jobs); }
+    Api.deleteJob(job.id).catch(function () {});
+    toast('Orçamento excluído.');
+    go('home');
+  });
+
   /* ---------- orçamento ---------- */
   function renderQuote() {
     var d = currentList();
+    setStatus(job.status || 'draft');
+    $('#btn-delete-job').style.display = job.savedAt ? '' : 'none';
     $('#quote-discount').value = job.discount || 0;
     $('#quote-tax').value = job.taxPct || 0;
     var cfg = Object.assign({}, d.cfg, { discount: job.discount, taxPct: job.taxPct });
@@ -1778,7 +1928,9 @@
     });
   });
 
-  $('#btn-save').addEventListener('click', function () {
+  $('#btn-save').addEventListener('click', function () { saveJob(false); });
+
+  function saveJob(quiet) {
     job.savedAt = Date.now();
     job.total = job._price.total;
     job.feet = job._m.feet;
@@ -1789,10 +1941,10 @@
     if (i >= 0) jobs[i] = copy; else jobs.unshift(copy);
     try {
       localStorage.setItem(K.jobs, JSON.stringify(jobs));
-      toast('Orçamento ' + job.id + ' salvo.');
+      if (!quiet) toast('Orçamento ' + job.id + ' salvo.');
       pushJob(copy).then(function (ok) {
         refreshSyncBar();
-        if (ok) toast('Enviado para a nuvem.');
+        if (ok && !quiet) toast('Enviado para a nuvem.');
       });
     } catch (err) {
       (copy.manual || []).forEach(function (e) { delete e.img; });   // mantém só a miniatura
@@ -1803,7 +1955,7 @@
         toast('Sem espaço no aparelho. Exporte e apague orçamentos antigos.');
       }
     }
-  });
+  }
 
   /* ---------- imagens para o PDF ----------
      Monta um PNG do mapa com as linhas desenhadas e um PNG de cada foto
@@ -2133,8 +2285,10 @@
 
   function renderHistory() {
     $('#history-list').innerHTML = jobs.length ? jobs.map(function (j) {
+      var st = ST[j.status] || ST.draft;
       return '<div class="list-item" data-open="' + j.id + '"><div class="li-main"><b>' + (j.client.name || 'Sem nome') + '</b>' +
-        '<small>' + new Date(j.savedAt).toLocaleDateString('pt-BR') + ' · ' + ft(j.feet) + ' · ' + j.id + '</small></div>' +
+        '<small>' + new Date(j.savedAt).toLocaleDateString('pt-BR') + ' · ' + ft(j.feet) +
+        ' · <span class="st-tag ' + st.cls + '">' + st.label + '</span></small></div>' +
         '<span class="li-val">' + money(j.total) + '</span></div>';
     }).join('') : '<p class="empty">Nenhum orçamento salvo ainda.</p>';
   }
@@ -2145,6 +2299,9 @@
     var found = jobs.filter(function (j) { return j.id === el.dataset.open; })[0];
     if (!found) return;
     job = JSON.parse(JSON.stringify(found));
+    job.manual = job.manual || [];
+    job.runs = job.runs || [];
+    fillJobForm();
     go('quote');
   });
 
