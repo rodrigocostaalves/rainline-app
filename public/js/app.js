@@ -913,10 +913,22 @@
     // normaliza
     var k = 255 / max;
     for (var p2 = 0; p2 < mag.length; p2++) mag[p2] = mag[p2] * k;
-    ph.edge = { w: w, h: h, mag: mag, sx: w / img.naturalWidth, sy: h / img.naturalHeight };
+    // limiar pelo histograma: o corte acompanha o contraste real da imagem.
+    // Sem isso, uma barra preta de navegador vira o "máximo" e joga a borda do
+    // telhado para baixo do corte fixo.
+    var hist = new Uint32Array(256);
+    for (var hh = 0; hh < mag.length; hh++) hist[mag[hh]]++;
+    var total = mag.length, want = Math.round(total * 0.06), cum = 0, cut = 60;
+    for (var bb = 255; bb >= 5; bb--) {
+      cum += hist[bb];
+      if (cum >= want) { cut = bb; break; }
+    }
+    cut = Math.max(22, Math.min(110, cut));
+
+    ph.edge = { w: w, h: h, mag: mag, cut: cut, sx: w / img.naturalWidth, sy: h / img.naturalHeight };
 
     // camada visual das bordas — dilatada, senão some quando a foto encolhe na tela
-    var TH = 58;
+    var TH = Math.max(18, ph.edge.cut - 12);
     var thick = new Uint8ClampedArray(w * h);
     for (var yy = 1; yy < h - 1; yy++) {
       for (var xx = 1; xx < w - 1; xx++) {
@@ -948,7 +960,7 @@
     if (!ph.snap || !ph.edge) return p;
     var R = Math.max(3, Math.round(16 / ph.fit.s * ph.edge.sx));   // ~16 px de tela
     var cx = Math.round(p.x * ph.edge.sx), cy = Math.round(p.y * ph.edge.sy);
-    var best = null, bv = 80;                                       // limiar mínimo
+    var best = null, bv = ph.edge.cut;                              // limiar mínimo
     for (var y = cy - R; y <= cy + R; y++) {
       if (y < 1 || y >= ph.edge.h - 1) continue;
       for (var x = cx - R; x <= cx + R; x++) {
@@ -1116,7 +1128,7 @@
     var cv = photoCanvas();
     var pts = {};              // ponteiros ativos
     var moved = false, startD = 0, startZ = 1, startMid = null, startOx = 0, startOy = 0;
-    var panFrom = null;
+    var panFrom = null, pendingDrag = null;
 
     function toImg(cx, cy) {
       var r = cv.getBoundingClientRect();
@@ -1128,7 +1140,7 @@
 
     // devolve o ponto sob o dedo, se houver
     function hit(p) {
-      var tol = 20 / ph.fit.s;   // 20 px de tela, convertidos para pixel de imagem
+      var tol = 16 / ph.fit.s;   // 16 px de tela, convertidos para pixel de imagem
       var best = null, bd = tol;
       ph.ref.forEach(function (q, i) {
         var d = pxLen(p, q);
@@ -1153,7 +1165,8 @@
       if (n === 1) {
         moved = false;
         var p = toImg(e.clientX, e.clientY);
-        ph.drag = hit(p);
+        pendingDrag = hit(p);       // candidato: só vira arrasto se o dedo andar
+        ph.drag = null;
         panFrom = { x: e.clientX, y: e.clientY, ox: ph.view.ox, oy: ph.view.oy };
       } else if (n === 2) {
         ph.drag = null;
@@ -1190,7 +1203,10 @@
       }
 
       var dx = e.clientX - panFrom.x, dy = e.clientY - panFrom.y;
-      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        if (!moved && pendingDrag) ph.drag = pendingDrag;   // agora sim é arrasto
+        moved = true;
+      }
 
       if (ph.drag) {                             // arrastando um ponto
         var p = toImg(e.clientX, e.clientY);
@@ -1211,12 +1227,14 @@
 
     function end(e) {
       if (!pts[e.pointerId]) return;
-      var wasDrag = ph.drag, wasMoved = moved;
+      var wasMoved = moved;
       delete pts[e.pointerId];
       if (ids().length === 0) {
         ph.drag = null;
+        pendingDrag = null;
         hidePhLoupe();
-        if (!wasMoved && !wasDrag && ph.img) addPhotoPoint(e.clientX, e.clientY);
+        // toque sem arrasto sempre cria ponto, mesmo perto de outro
+        if (!wasMoved && ph.img) addPhotoPoint(e.clientX, e.clientY);
       }
       if (ids().length === 1) {                  // soltou um dedo da pinça
         var k = ids()[0];
@@ -1577,10 +1595,11 @@
      Depois recortamos os trechos onde a borda existe de fato. */
   var candidates = [];
 
-  function detectLines() {
+  function detectLines(relax) {
     if (!ph.edge) return [];
+    var RELAX = relax || 1;
     var W = ph.edge.w, H = ph.edge.h, mag = ph.edge.mag;
-    var TH = 70;
+    var TH = Math.max(14, Math.round(ph.edge.cut / RELAX));
     var NT = 180;                                   // 1 grau por passo
     var rhoMax = Math.ceil(Math.hypot(W, H));
     var NR = Math.ceil(2 * rhoMax / 2);             // 2 px por passo
@@ -1603,7 +1622,7 @@
     }
 
     // picos: máximos locais acima de um mínimo
-    var minVotes = Math.max(18, Math.round(Math.min(W, H) * 0.055 / step));
+    var minVotes = Math.max(12, Math.round(Math.min(W, H) * 0.055 / step / RELAX));
     var peaks = [];
     for (var ti = 0; ti < NT; ti++) {
       for (var ri = 1; ri < NR - 1; ri++) {
@@ -1649,7 +1668,7 @@
       if (run) found.push(run);
       found.forEach(function (f) {
         var len = f.b - f.a;
-        if (len < Math.min(W, H) * 0.07) return;    // trecho curto: descarta
+        if (len < Math.min(W, H) * 0.07 / RELAX) return;   // trecho curto: descarta
         segs.push({
           a: { x: (x0 + dx * f.a) / ph.edge.sx, y: (y0 + dy * f.a) / ph.edge.sy },
           b: { x: (x0 + dx * f.b) / ph.edge.sx, y: (y0 + dy * f.b) / ph.edge.sy },
@@ -1682,7 +1701,9 @@
     }
     toast('Procurando as linhas…');
     setTimeout(function () {
-      candidates = detectLines();
+      candidates = detectLines(1);
+      if (candidates.length < 3) candidates = detectLines(1.8);   // 2ª tentativa, mais permissiva
+      if (candidates.length < 2) candidates = detectLines(3);     // 3ª, última
       recalcPhoto();
       toast(candidates.length
         ? candidates.length + ' linhas encontradas. Toque nas que são calha.'
