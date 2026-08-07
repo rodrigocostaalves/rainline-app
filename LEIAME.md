@@ -1,76 +1,135 @@
-# RainLine — v0.2 (visual)
+# RainLine — v0.17
 
-App de orçamento de calhas (gutters) para uso em campo. PWA, roda no navegador do
-celular e pode ser instalado na tela inicial. Sem back-end: tudo fica no aparelho.
+## Usar a régua do Google Earth como referência
 
-## Como rodar
+Chip **Régua da imagem** na tela da foto, mais um seletor **ft / m** ao lado do
+campo. Fluxo: digite o número que a régua mostra (ex.: 9), escolha `m`, e trace
+em cima da barra branca, ponta a ponta. Pronto — a escala sai dali.
 
-Precisa ser servido por HTTP (o service worker e o `fetch` não funcionam abrindo o
-arquivo direto do disco).
+### O aviso que importa
 
-- **Teste local:** `python3 -m http.server 8080` dentro desta pasta → abrir `http://localhost:8080`
-- **Publicar:** joga a pasta num repositório e ativa GitHub Pages, ou arrasta para o Cloudflare Pages.
+**Só funciona em vista de cima.** Na imagem inclinada do Google Earth a escala
+muda dentro do próprio quadro: o que está no fundo aparece menor que o que está
+na frente, e a régua só vale para a faixa onde ela está desenhada. Medir o
+telhado inteiro com ela daria erro grande.
 
-Login inicial: **admin / 1234** (troca em Configurações).
+No Google Earth existe o botão **2D** no canto direito. Ative antes de tirar o
+print. Aí a régua vale para a imagem inteira.
 
-## Testar sem digitar nada
-No painel, toque em **"Ver exemplo pronto (casa medida)"**. Ele carrega um cliente
-fictício em Winter Garden com o telhado já desenhado (~156 ft, 2 linhas, 2 cantos).
-Arraste os pontos amarelos e veja a fita recalcular, depois siga para Materiais →
-Orçamento → Gerar PDF para ver o fluxo inteiro.
+A vista inclinada continua útil — para **enxergar** onde estão os beirais do
+térreo escondidos. Para medir, use a de cima.
 
-## O que já funciona
+## Alinhar
 
-| Tela | Estado |
+Botão **Alinhar** ao lado de Bordas. Depois de traçar por cima, ele empurra cada
+trecho para a reta de maior contraste ali perto (testa pequenas variações de
+ângulo e deslocamento) e recalcula os cantos como interseção das retas vizinhas —
+que é como um canto de telhado se comporta de verdade.
+
+Serve para tirar o tremido do dedo. Se um trecho ficar sem borda nítida, ele
+mantém o que você desenhou em vez de inventar. Confira sempre antes de somar.
+
+---
+
+# Backend na nuvem (v0.16)
+
+
+App de orçamento de calhas. A partir desta versão os orçamentos ficam num banco de
+dados na sua conta Cloudflare, com login de verdade e fotos guardadas no R2 — sem
+deixar de funcionar offline.
+
+## Estrutura do repositório
+
+```
+wrangler.jsonc        configuração do deploy (bindings do banco e do bucket)
+.assetsignore
+worker/index.js       a API  (/api/...)
+worker/schema.sql     as tabelas do banco
+public/               o app  (o que o navegador baixa)
+```
+
+Suba tudo mantendo essas pastas. O `public/` continua sendo o que vai para o navegador.
+
+---
+
+# Passo a passo da instalação (faça uma vez)
+
+## 1. Criar o banco D1
+
+Cloudflare → **Storage & Databases** → **D1** → *Create database*
+Nome: `rainline`
+
+Copie o **Database ID** que aparece e cole no `wrangler.jsonc`, no lugar de
+`COLE_AQUI_O_ID_DA_SUA_BASE`.
+
+## 2. Criar as tabelas
+
+Na base recém-criada, abra a aba **Console** e cole o conteúdo de
+`worker/schema.sql`. Execute.
+
+Isso cria as tabelas e o usuário inicial **admin / 1234**.
+
+## 3. Criar o bucket das fotos
+
+Cloudflare → **R2** → *Create bucket*
+Nome: `rainline-photos`
+
+## 4. Publicar
+
+Faça o commit e o deploy roda sozinho. No log deve aparecer a leitura dos arquivos
+de `/public` e o upload do Worker.
+
+## 5. Conferir
+
+Abra `https://seu-endereco.workers.dev/api/health` — deve responder
+`{"ok":true,...}`. Se responder outra coisa, algum binding está faltando.
+
+## 6. Trocar a senha
+
+Entre no app com **admin / 1234** e vá em Configurações → Conta na nuvem →
+**Trocar senha**. Faça isso antes de qualquer outra coisa: a senha inicial está
+escrita neste arquivo e no seu repositório público.
+
+---
+
+## Como funciona no dia a dia
+
+**Login** — agora é validado no servidor. A senha fica guardada como hash PBKDF2
+com 100 mil iterações e sal próprio; nem eu nem você conseguimos ler a senha a
+partir do banco.
+
+**Vendedores** — logado como admin, em Configurações aparece a lista de usuários e
+um formulário para criar vendedores. Cada vendedor vê só os próprios orçamentos; o
+admin vê todos.
+
+**Sincronização** — a barra no topo do painel mostra o estado:
+
+| Cor | Significado |
 |---|---|
-| Login | local, sem servidor |
-| Dashboard | contadores do mês |
-| Novo orçamento | dados do cliente + busca de endereço |
-| Mapa | satélite, desenho por toque, pontos arrastáveis, comprimento por trecho |
-| Materiais | lista calculada, toda quantidade editável |
-| Preços | modo "$/pé instalado" ou item a item, com margem |
-| Orçamento | proposta em inglês, PDF pela impressão, compartilhar |
-| Clientes / Histórico | salvos no aparelho |
+| verde | tudo sincronizado |
+| amarelo | há orçamentos esperando para subir |
+| vermelho | sem servidor — trabalhando offline |
 
-## Estrutura
+**Offline** — se o servidor não responder (sinal ruim no quintal do cliente), o
+app entra em modo local: o login usa a senha guardada em Configurações e os
+orçamentos ficam marcados como pendentes. Quando a internet voltar, ele envia
+sozinho — ou toque em **Sincronizar**.
 
-```
-index.html          todas as telas
-css/app.css         identidade visual
-js/materials.js     TODAS as regras de cálculo (mexa aqui para ajustar)
-js/app.js           navegação, mapa, telas
-sw.js               cache offline do app (tiles não são cacheados)
-```
+**Fotos** — ao salvar, cada foto vai para o R2 e o app apaga a cópia em base64 do
+aparelho, guardando só a chave e a miniatura. Isso resolve de vez o problema de
+memória cheia: antes cada foto ocupava uns 200 KB do limite de 5 MB do navegador.
 
-## Regras de cálculo (padrão, editáveis em Configurações)
+**Trocar de celular** — entre com o mesmo usuário e os orçamentos descem sozinhos.
 
-- Calha = medido + 10% de perda
-- Cantos = vértices intermediários de cada linha desenhada
-- End caps = 2 por linha
-- Hangers = 1 a cada 24" (padrão Flórida)
-- Downspouts = 1 a cada 35 ft, mínimo 1 por linha
-- Comprimento da descida = 12 ft (1 andar) / 22 ft (2) / 32 ft (3)
-- Elbows = 3 por descida · Straps = 2 por andar · Splash block = 1 por descida
+---
 
-## Limites conhecidos da v0.1
+## Sobre custo
 
-- **Login não é segurança de verdade.** É só um cadeado local.
-- **Imagens de satélite:** camada Esri World Imagery, ótima para testar. Para uso
-  comercial em escala, contratar Google Maps, Mapbox ou Nearmap.
-- **Busca de endereço:** Nominatim (OpenStreetMap), gratuito e com limite de uso.
-  Em produção, trocar por Google Geocoding.
-- **Precisão:** a foto de satélite é ortogonal, então beiral horizontal mede certo.
-  Erro típico de 1–3 ft por causa da resolução e do beiral projetado. Use o
-  **fator de calibração** em Configurações: meça uma parede conhecida e ajuste.
-- Dados só neste aparelho. Trocou de celular, perdeu — use "Exportar dados".
+D1 e R2 têm faixa gratuita generosa para o volume de uma empresa de calhas: são
+milhares de leituras por dia e vários gigabytes de foto antes de sair do gratuito.
+Confira os limites atuais no painel, porque a Cloudflare ajusta de tempos em tempos.
 
-## Próximos passos sugeridos
+## O que ainda não existe
 
-**v0.2** — Cloudflare Worker + D1 para login real e orçamentos na nuvem (mesmo
-padrão do VipRide), múltiplos vendedores, PDF de verdade em vez de impressão.
-
-**v0.3 (IA)** — detecção automática do contorno do telhado. Caminho mais barato:
-usar Segment Anything ou um modelo de segmentação de edificações na imagem de
-satélite, vetorizar o contorno, simplificar com Douglas-Peucker e devolver os
-pontos para o mesmo editor que já existe aqui. O vendedor só arrasta o que ficou
-errado — a UI não muda.
+Assinatura digital, link de pagamento, agenda e QuickBooks. Todos dependiam deste
+backend — agora têm onde se apoiar.
