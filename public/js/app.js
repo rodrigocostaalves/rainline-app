@@ -479,6 +479,11 @@
     return String(lv) === '2' ? '#4FC3F7' : String(lv) === '3' ? '#C77DFF' : '#FFC91B';
   }
 
+  var SIDES = ['frente', 'direita', 'fundo', 'esquerda'];
+  function sideName(s2) {
+    return { frente: 'frente', direita: 'lado direito', fundo: 'fundo', esquerda: 'lado esquerdo' }[s2] || 'frente';
+  }
+
   function levelName(lv) {
     return String(lv) === '2' ? '2º andar' : String(lv) === '3' ? '3º' : 'térreo';
   }
@@ -817,6 +822,13 @@
         '<button class="mini-x" data-del-man="' + i + '">✕</button></div>';
     });
     $('#parts-photo').innerHTML = ph2 || '<p class="hint" style="margin:0">Nenhuma foto medida ainda.</p>';
+
+    var done = {};
+    (job.manual || []).forEach(function (e) { if (e.side) done[e.side] = true; });
+    $('#sides-check').innerHTML = SIDES.map(function (k) {
+      return '<span class="side-chip ' + (done[k] ? 'ok' : '') + '">' +
+        (done[k] ? '✓ ' : '') + sideName(k) + '</span>';
+    }).join('');
     refreshPartsBadge();
   }
 
@@ -872,6 +884,8 @@
     edge: null,                     // mapa de bordas (Sobel) da imagem
     edgeCanvas: null,               // desenho das bordas para sobrepor
     snap: true,                     // encaixar o ponto na borda mais forte
+    onlyH: true,                    // só linhas quase horizontais
+    side: 'frente',                 // qual lado da casa esta foto mostra
     unit: 'ft',                     // unidade da referência digitada
     showEdges: false
   };
@@ -896,43 +910,91 @@
     for (var i = 0, j = 0; i < src.length; i += 4, j++) {
       gray[j] = (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114);
     }
-    var mag = new Uint8ClampedArray(w * h);
-    var max = 1;
-    for (var y = 1; y < h - 1; y++) {
-      for (var x = 1; x < w - 1; x++) {
-        var o = y * w + x;
-        var gx = -gray[o - w - 1] - 2 * gray[o - 1] - gray[o + w - 1]
-                 + gray[o - w + 1] + 2 * gray[o + 1] + gray[o + w + 1];
-        var gy = -gray[o - w - 1] - 2 * gray[o - w] - gray[o - w + 1]
-                 + gray[o + w - 1] + 2 * gray[o + w] + gray[o + w + 1];
-        var m = Math.sqrt(gx * gx + gy * gy);
-        if (m > max) max = m;
-        mag[o] = m;
+
+    /* Desfoque gaussiano antes do gradiente.
+       É o que separa "textura" de "estrutura": grama, folhagem e as fileiras de
+       telha são detalhe fino e somem no borrão; a linha do beiral, que é longa,
+       sobrevive. Sem esta etapa o detector via mato com a mesma força que calha. */
+    var K = [1, 4, 6, 4, 1], KS = 16;
+    var tmp = new Float32Array(w * h), blur = new Float32Array(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var acc = 0;
+        for (var k = -2; k <= 2; k++) {
+          var xx = Math.min(w - 1, Math.max(0, x + k));
+          acc += gray[y * w + xx] * K[k + 2];
+        }
+        tmp[y * w + x] = acc / KS;
       }
     }
-    // normaliza
-    var k = 255 / max;
-    for (var p2 = 0; p2 < mag.length; p2++) mag[p2] = mag[p2] * k;
-    // limiar pelo histograma: o corte acompanha o contraste real da imagem.
-    // Sem isso, uma barra preta de navegador vira o "máximo" e joga a borda do
-    // telhado para baixo do corte fixo.
+    for (var y2 = 0; y2 < h; y2++) {
+      for (var x2 = 0; x2 < w; x2++) {
+        var acc2 = 0;
+        for (var k2 = -2; k2 <= 2; k2++) {
+          var yy = Math.min(h - 1, Math.max(0, y2 + k2));
+          acc2 += tmp[yy * w + x2] * K[k2 + 2];
+        }
+        blur[y2 * w + x2] = acc2 / KS;
+      }
+    }
+
+    var raw = new Float32Array(w * h);
+    var dir = new Uint8Array(w * h);        // 0=—  1=/  2=|  3=\
+    var ang = new Float32Array(w * h);      // ângulo da borda, para filtrar depois
+    var max = 1;
+    for (var y3 = 1; y3 < h - 1; y3++) {
+      for (var x3 = 1; x3 < w - 1; x3++) {
+        var o = y3 * w + x3;
+        var gx = -blur[o - w - 1] - 2 * blur[o - 1] - blur[o + w - 1]
+                 + blur[o - w + 1] + 2 * blur[o + 1] + blur[o + w + 1];
+        var gy = -blur[o - w - 1] - 2 * blur[o - w] - blur[o - w + 1]
+                 + blur[o + w - 1] + 2 * blur[o + w] + blur[o + w + 1];
+        var m = Math.sqrt(gx * gx + gy * gy);
+        if (m > max) max = m;
+        raw[o] = m;
+        var a2 = Math.atan2(gy, gx);                       // direção do gradiente
+        ang[o] = a2 + Math.PI / 2;                         // direção da borda
+        var deg = (a2 * 180 / Math.PI + 180) % 180;
+        dir[o] = (deg < 22.5 || deg >= 157.5) ? 0 : (deg < 67.5) ? 1 : (deg < 112.5) ? 2 : 3;
+      }
+    }
+
+    /* Supressão de não-máximos: mantém só a crista da borda.
+       Uma borda de 4 px de largura vira uma linha de 1 px, e aí a detecção
+       consegue casar as retas em vez de se perder na espessura. */
+    var mag = new Uint8ClampedArray(w * h);
+    var kk = 255 / max;
+    for (var y4 = 1; y4 < h - 1; y4++) {
+      for (var x4 = 1; x4 < w - 1; x4++) {
+        var o4 = y4 * w + x4, v = raw[o4], p1, p2;
+        if (dir[o4] === 0) { p1 = raw[o4 - 1]; p2 = raw[o4 + 1]; }
+        else if (dir[o4] === 1) { p1 = raw[o4 - w + 1]; p2 = raw[o4 + w - 1]; }
+        else if (dir[o4] === 2) { p1 = raw[o4 - w]; p2 = raw[o4 + w]; }
+        else { p1 = raw[o4 - w - 1]; p2 = raw[o4 + w + 1]; }
+        mag[o4] = (v >= p1 && v >= p2) ? v * kk : 0;
+      }
+    }
+
+    // limiar pelo histograma da própria imagem
     var hist = new Uint32Array(256);
     for (var hh = 0; hh < mag.length; hh++) hist[mag[hh]]++;
-    var total = mag.length, want = Math.round(total * 0.06), cum = 0, cut = 60;
+    var nonzero = mag.length - hist[0];
+    var want = Math.round(nonzero * 0.14), cum = 0, cut = 60;
     for (var bb = 255; bb >= 5; bb--) {
       cum += hist[bb];
       if (cum >= want) { cut = bb; break; }
     }
-    cut = Math.max(22, Math.min(110, cut));
+    cut = Math.max(22, Math.min(120, cut));
 
-    ph.edge = { w: w, h: h, mag: mag, cut: cut, sx: w / img.naturalWidth, sy: h / img.naturalHeight };
+    ph.edge = { w: w, h: h, mag: mag, ang: ang, cut: cut,
+                sx: w / img.naturalWidth, sy: h / img.naturalHeight };
 
-    // camada visual das bordas — dilatada, senão some quando a foto encolhe na tela
-    var TH = Math.max(18, ph.edge.cut - 12);
+    // camada visual das bordas
+    var TH = Math.max(18, cut - 10);
     var thick = new Uint8ClampedArray(w * h);
-    for (var yy = 1; yy < h - 1; yy++) {
-      for (var xx = 1; xx < w - 1; xx++) {
-        var oo = yy * w + xx, mx = 0;
+    for (var yy2 = 1; yy2 < h - 1; yy2++) {
+      for (var xx2 = 1; xx2 < w - 1; xx2++) {
+        var oo = yy2 * w + xx2, mx = 0;
         for (var dy = -1; dy <= 1; dy++) {
           for (var dx = -1; dx <= 1; dx++) {
             var vv = mag[oo + dy * w + dx];
@@ -947,9 +1009,8 @@
     var og = oc.getContext('2d');
     var id = og.createImageData(w, h);
     for (var q = 0, r = 0; q < thick.length; q++, r += 4) {
-      var v = thick[q];
       id.data[r] = 43; id.data[r + 1] = 255; id.data[r + 2] = 214;
-      id.data[r + 3] = v > TH ? 255 : 0;
+      id.data[r + 3] = thick[q] > TH ? 255 : 0;
     }
     og.putImageData(id, 0, 0);
     ph.edgeCanvas = oc;
@@ -992,6 +1053,10 @@
     } else {
       var e = job.manual[idx];
       ph.level = e.level || 1;
+      ph.side = e.side || 'frente';
+      $$('[data-side]').forEach(function (o) {
+        o.classList.toggle('is-on', o.dataset.side === ph.side);
+      });
       ph.ref = (e.ref || []).slice();
       ph.runs = (e.lines && e.lines.length) ? JSON.parse(JSON.stringify(e.lines)) : [[]];
       $('#ref-feet').value = e.refFeet || 16;
@@ -1119,6 +1184,14 @@
       $$('[data-plevel]').forEach(function (o) { o.classList.remove('is-on'); });
       b.classList.add('is-on');
       ph.level = +b.dataset.plevel;
+    });
+  });
+
+  $$('[data-side]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      $$('[data-side]').forEach(function (o) { o.classList.remove('is-on'); });
+      b.classList.add('is-on');
+      ph.side = b.dataset.side;
     });
   });
 
@@ -1572,6 +1645,12 @@
     return out;
   }
 
+  $('#btn-onlyh').addEventListener('click', function () {
+    ph.onlyH = !ph.onlyH;
+    $('#btn-onlyh').classList.toggle('is-on', ph.onlyH);
+    toast(ph.onlyH ? 'Buscando só linhas horizontais.' : 'Buscando linhas em qualquer direção.');
+  });
+
   $('#btn-align').addEventListener('click', function () {
     if (!ph.img) return;
     if (!ph.edge) { toast('Sem mapa de bordas para esta imagem.'); return; }
@@ -1642,6 +1721,15 @@
     peaks.sort(function (a, b) { return b.v - a.v; });
     peaks = peaks.slice(0, 60);
 
+    // calha numa foto de fachada é quase horizontal; a perspectiva inclina um
+    // pouco, mas nunca vira vertical. Isso corta mato, tronco e cerca.
+    if (ph.onlyH) {
+      peaks = peaks.filter(function (pk) {
+        var lineDeg = ((pk.t * 180 / NT) + 90) % 180;      // direção da reta
+        return lineDeg <= 32 || lineDeg >= 148;
+      });
+    }
+
     // de cada reta, extrai os trechos onde existe borda de verdade
     var segs = [];
     peaks.forEach(function (pk) {
@@ -1687,7 +1775,7 @@
       });
       if (!dup) out.push(s2);
     });
-    return out.slice(0, 22);
+    return out.slice(0, 12);
   }
 
   function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
@@ -1778,7 +1866,8 @@
       feet: Math.round(t.feet),
       corners: t.corners,
       level: ph.level,
-      note: 'Foto ' + (levelName(ph.level)),
+      side: ph.side,
+      note: 'Foto · ' + sideName(ph.side) + ' · ' + levelName(ph.level),
       refFeet: refFeetValue(),
       ref: ph.ref.slice(),
       lines: JSON.parse(JSON.stringify(ph.runs)),
