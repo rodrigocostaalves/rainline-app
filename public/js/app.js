@@ -257,7 +257,7 @@
   function newJob() {
     job = {
       id: 'Q' + Date.now().toString(36).toUpperCase(),
-      client: {}, runs: [], manual: [], overrides: {}, status: 'draft',
+      client: {}, runs: [], manual: [], overrides: {}, status: 'draft', marginMode: 'pct',
       size: 5, stories: 1, color: '', discount: 0, taxPct: 0, savedAt: null
     };
     $('#form-job').reset();
@@ -2204,13 +2204,11 @@
     $$('#margin-row .st-btn').forEach(function (b) {
     b.addEventListener('click', function () {
       job.marginMode = b.dataset.margin;
-      if (b.dataset.margin === 'value' && !settings.marginValue) {
-        toast('Defina o valor da margem em Configurações.');
-      }
       if (b.dataset.margin === 'pct' && !settings.marginPct) {
         toast('Defina o percentual da margem em Configurações.');
       }
       renderQuote();
+      if (job.savedAt) saveJob(true);
     });
   });
 
@@ -2222,13 +2220,11 @@
   $$('#margin-row .st-btn').forEach(function (b) {
     b.addEventListener('click', function () {
       job.marginMode = b.dataset.margin;
-      if (b.dataset.margin === 'value' && !settings.marginValue) {
-        toast('Defina o valor da margem em Configurações.');
-      }
       if (b.dataset.margin === 'pct' && !settings.marginPct) {
         toast('Defina o percentual da margem em Configurações.');
       }
       renderQuote();
+      if (job.savedAt) saveJob(true);
     });
   });
 
@@ -2299,10 +2295,10 @@
     $('#quote-discount').value = job.discount || 0;
     $('#quote-tax').value = job.taxPct || 0;
     var cfg = Object.assign({}, d.cfg, {
-      discount: job.discount, taxPct: job.taxPct, marginMode: job.marginMode || 'none'
+      discount: job.discount, taxPct: job.taxPct, marginMode: job.marginMode || 'pct'
     });
     $$('#margin-row .st-btn').forEach(function (b) {
-      b.classList.toggle('is-on', b.dataset.margin === (job.marginMode || 'none'));
+      b.classList.toggle('is-on', b.dataset.margin === (job.marginMode || 'pct'));
     });
     var p = Calc.price(d.list, cfg);
     job._price = p; job._list = d.list; job._m = d.m;
@@ -2322,6 +2318,27 @@
       (p.tax ? '<div class="q-line"><span>Imposto</span><span>' + money(p.tax) + '</span></div>' : '');
 
     $('#quote-total').textContent = money(p.total);
+
+    // esta caixa é só para você. Não sai no PDF nem no compartilhamento.
+    var mb = $('#margin-box');
+    var pctTxt = (settings.marginPct || 0) + '%';
+    if (p.margin > 0) {
+      var restante = p.margin - (p.discount || 0);
+      var pctReal = p.cost > 0 ? (restante / p.cost * 100) : 0;
+      mb.innerHTML =
+        '<div class="mb-row"><span>Custo + mão de obra</span><b>' + money(p.cost) + '</b></div>' +
+        '<div class="mb-row"><span>Margem ' + pctTxt + '</span><b>' + money(p.margin) + '</b></div>' +
+        (p.discount ? '<div class="mb-row"><span>Desconto dado</span><b>-' + money(p.discount) + '</b></div>' : '') +
+        '<div class="mb-row"><span><b>Sobra para você</b></span>' +
+        '<b class="mb-big ' + (restante <= 0 ? 'mb-warn' : '') + '">' + money(restante) +
+        '</b></div>' +
+        '<small>' + (restante <= 0
+          ? 'O desconto comeu toda a margem — este trabalho sai no prejuízo.'
+          : 'Equivale a ' + pctReal.toFixed(1) + '% sobre o custo. Só você vê isto.') + '</small>';
+    } else {
+      mb.innerHTML = '<div class="mb-row"><span>Custo + mão de obra</span><b>' + money(p.cost) + '</b></div>' +
+        '<small>Sem margem aplicada: você está vendendo pelo custo.</small>';
+    }
   }
   ['#quote-discount', '#quote-tax'].forEach(function (sel) {
     $(sel).addEventListener('input', function () {
@@ -2497,44 +2514,60 @@
         var g = cv.getContext('2d');
         g.drawImage(im, 0, 0, cv.width, cv.height);
         g.lineCap = 'round'; g.lineJoin = 'round';
+        var LW = Math.max(4, Math.round(cv.width / 150));   // traço proporcional ao papel
+        var FS = Math.max(13, Math.round(cv.width / 55));
 
-        function P(p) { return [p.x * s, p.y * s]; }
+        // pontos gravados em coordenada relativa (0..1) desde a v0.24
+        var fx = entry.norm ? im.naturalWidth : 1;
+        var fy = entry.norm ? im.naturalHeight : 1;
+        function P(p) { return [p.x * fx * s, p.y * fy * s]; }
         var px = entry.refPx || 0;
         var sc = 0;
         if (entry.ref && entry.ref.length === 2) {
-          var d = Math.hypot(entry.ref[0].x - entry.ref[1].x, entry.ref[0].y - entry.ref[1].y);
+          var d = Math.hypot((entry.ref[0].x - entry.ref[1].x) * fx,
+                             (entry.ref[0].y - entry.ref[1].y) * fy);
           sc = d > 0 ? (entry.refFeet || 16) / d : 0;
-          g.strokeStyle = '#2BE0C0'; g.lineWidth = 4;
+          g.strokeStyle = '#2BE0C0'; g.lineWidth = LW;
           g.beginPath();
           entry.ref.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
           g.stroke();
           var A = P(entry.ref[0]), B = P(entry.ref[1]);
-          g.font = '600 15px monospace'; g.fillStyle = '#2BE0C0';
+          g.font = '600 ' + FS + 'px monospace'; g.fillStyle = '#2BE0C0';
           g.fillText('ref ' + (entry.refFeet || 16) + " ft", (A[0] + B[0]) / 2 - 26, (A[1] + B[1]) / 2 + 22);
         }
 
+        (entry.dsLines || []).forEach(function (r) {
+          if (r.length < 2) return;
+          g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = LW * 2;
+          g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
+          g.strokeStyle = '#FF8A3D'; g.lineWidth = LW;
+          g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
+        });
+
         (entry.lines || []).forEach(function (r) {
           if (r.length < 2) return;
-          g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = 9;
+          g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = LW * 2.2;
           g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
-          g.strokeStyle = '#FFC91B'; g.lineWidth = 4;
+          g.strokeStyle = '#FFC91B'; g.lineWidth = LW;
           g.beginPath(); r.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.stroke();
           if (sc) {
-            g.font = '600 15px monospace';
+            g.font = '600 ' + FS + 'px monospace';
             for (var i = 1; i < r.length; i++) {
               var a = P(r[i - 1]), bb = P(r[i]);
-              var len = Math.hypot(r[i].x - r[i - 1].x, r[i].y - r[i - 1].y) * sc;
+              var len = Math.hypot((r[i].x - r[i - 1].x) * fx,
+                                   (r[i].y - r[i - 1].y) * fy) * sc;
               var mx = (a[0] + bb[0]) / 2, my = (a[1] + bb[1]) / 2;
               var txt = Math.round(len) + " ft";
-              var w = g.measureText(txt).width + 12;
-              g.fillStyle = 'rgba(14,19,23,.9)'; g.fillRect(mx - w / 2, my - 12, w, 24);
-              g.fillStyle = '#FFC91B'; g.fillText(txt, mx - w / 2 + 6, my + 6);
+              var w = g.measureText(txt).width + FS;
+              g.fillStyle = 'rgba(14,19,23,.9)';
+              g.fillRect(mx - w / 2, my - FS * 0.9, w, FS * 1.8);
+              g.fillStyle = '#FFC91B'; g.fillText(txt, mx - w / 2 + FS / 2, my + FS * 0.45);
             }
           }
           r.forEach(function (p) {
             var q = P(p);
-            g.fillStyle = '#FFC91B'; g.beginPath(); g.arc(q[0], q[1], 5, 0, 6.284); g.fill();
-            g.strokeStyle = '#0E1317'; g.lineWidth = 2; g.stroke();
+            g.fillStyle = '#FFC91B'; g.beginPath(); g.arc(q[0], q[1], LW * 1.3, 0, 6.284); g.fill();
+            g.strokeStyle = '#0E1317'; g.lineWidth = LW / 2; g.stroke();
           });
         });
 
@@ -2711,75 +2744,17 @@
   /* ---------- configurações ---------- */
   var SET_MAP = {
     '#set-company': 'company', '#set-phone': 'phone', '#set-email': 'email', '#set-license': 'license',
-    '#p-lf5': 'lf5', '#p-lf6': 'lf6', '#p-ds': 'dsFt', '#p-miter': 'miter', '#p-min': 'minJob',
+    '#p-min': 'minJob',
     '#d-lf5': 'd_lf5', '#d-lf6': 'd_lf6', '#d-ds': 'd_ds', '#d-elbow': 'd_elbow', '#d-miter': 'd_miter',
-    '#d-cap': 'd_cap', '#d-hanger': 'd_hanger', '#d-splash': 'd_splash', '#d-labor': 'd_labor', '#d-markup': 'd_markup',
-    '#p-mval': 'marginValue', '#p-mpct': 'marginPct',
+    '#d-cap': 'd_cap', '#d-hanger': 'd_hanger', '#d-splash': 'd_splash', '#d-labor': 'd_labor',
+    '#p-mpct': 'marginPct',
     '#r-hanger': 'hangerSpacingIn', '#r-ds': 'dsEveryFt', '#r-waste': 'wastePct', '#r-cal': 'calibration',
     '#set-user': 'user', '#set-pass': 'pass'
   };
 
   function fillSettings() {
     Object.keys(SET_MAP).forEach(function (sel) { $(sel).value = settings[SET_MAP[sel]]; });
-    setMode(settings.mode);
   }
-  function setMode(mode) {
-    $$('#seg-mode .seg-btn').forEach(function (b) { b.classList.toggle('is-on', b.dataset.mode === mode); });
-    $('#price-simple').hidden = mode !== 'simple';
-    $('#price-detail').hidden = mode !== 'detail';
-  }
-  $('#seg-mode').addEventListener('click', function (e) {
-    if (!e.target.dataset.mode) return;
-    settings.mode = e.target.dataset.mode; setMode(settings.mode);
-  });
-
-  function renderCloudCard() {
-    var st = $('#cloud-status');
-    if (!st) return;
-    if (cloud.user) {
-      st.textContent = 'Conectado como ' + cloud.user.username +
-        (cloud.user.role === 'admin' ? ' (administrador)' : ' (vendedor)') + '.';
-      $('#admin-users').hidden = cloud.user.role !== 'admin';
-      if (cloud.user.role === 'admin') {
-        Api.users().then(function (r) {
-          $('#users-list').innerHTML = (r.users || []).map(function (u) {
-            return '<div class="user-row"><span>' + u.username + '<br><small>' +
-              (u.role === 'admin' ? 'administrador' : 'vendedor') + '</small></span>' +
-              '<small>' + (u.active ? 'ativo' : 'inativo') + '</small></div>';
-          }).join('');
-        }).catch(function () {});
-      }
-    } else {
-      st.textContent = cloud.on === false
-        ? 'Sem servidor agora. O app está salvando só neste aparelho.'
-        : 'Sessão encerrada — entre de novo para sincronizar.';
-      $('#admin-users').hidden = true;
-    }
-  }
-
-  $('#btn-pw').addEventListener('click', function () {
-    var cur = $('#pw-cur').value, nx = $('#pw-new').value;
-    if (nx.length < 4) { toast('A nova senha precisa de pelo menos 4 caracteres.'); return; }
-    Api.changePassword(cur, nx).then(function () {
-      $('#pw-cur').value = ''; $('#pw-new').value = '';
-      toast('Senha alterada.');
-    }).catch(function (err) {
-      toast(err.code === 401 ? 'Senha atual não confere.' : 'Não consegui trocar agora.');
-    });
-  });
-
-  $('#btn-new-user').addEventListener('click', function () {
-    var u = $('#nu-user').value.trim(), p = $('#nu-pass').value;
-    if (!u || p.length < 4) { toast('Informe usuário e senha de 4+ caracteres.'); return; }
-    Api.createUser({ username: u, password: p, role: 'seller' }).then(function () {
-      $('#nu-user').value = ''; $('#nu-pass').value = '';
-      toast('Vendedor criado.');
-      renderCloudCard();
-    }).catch(function (err) {
-      toast(err.code === 409 ? 'Esse usuário já existe.' : 'Não consegui criar agora.');
-    });
-  });
-
   $('#btn-save-settings').addEventListener('click', function () {
     Object.keys(SET_MAP).forEach(function (sel) {
       var k = SET_MAP[sel], v = $(sel).value;

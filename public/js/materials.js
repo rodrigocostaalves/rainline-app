@@ -6,14 +6,12 @@
   var DEFAULTS = {
     company: '', phone: '', email: '', license: '',
     user: 'admin', pass: '1234',
-    mode: 'simple',
-    // preço por pé (venda instalada)
-    lf5: 9.00, lf6: 12.00, dsFt: 9.00, miter: 25.00, minJob: 350,
-    // item a item (custo + mão de obra + margem)
+    minJob: 0,
+    // custo do material + mão de obra
     d_lf5: 2.20, d_lf6: 3.10, d_ds: 2.40, d_elbow: 4.50,
     d_miter: 12.00, d_cap: 3.50, d_hanger: 3.20, d_splash: 8.00,
-    d_labor: 3.50, d_markup: 45,
-    marginValue: 0, marginPct: 0,
+    d_labor: 3.50,
+    marginPct: 20,
     // regras
     hangerSpacingIn: 24,   // Flórida: 24" por causa de vento/chuva forte
     dsEveryFt: 35,         // 1 descida a cada ~35 ft de calha
@@ -155,30 +153,25 @@
 
     var gutterFt = qty(list, 'gutter');
 
-    if (s.mode === 'detail') {
-      add(size + '" Seamless Gutter', gutterFt, size === '6' ? s.d_lf6 : s.d_lf5, 'ft');
-      add('Miters / Corners', qty(list, 'miters'), s.d_miter);
-      add('End Caps', qty(list, 'caps'), s.d_cap);
-      add('Hidden Hangers', qty(list, 'hangers'), s.d_hanger);
-      add('Downspout', qty(list, 'dsFt'), s.d_ds, 'ft');
-      add('Elbows', qty(list, 'elbows'), s.d_elbow);
-      add('Splash Blocks', qty(list, 'splash'), s.d_splash);
-      add('Instalação', gutterFt, s.d_labor, 'ft');
-      var markup = subtotal * (s.d_markup / 100);
-      if (markup > 0) { lines.push({ name: 'Margem (' + s.d_markup + '%)', qty: 1, unit: '', unitPrice: markup, total: markup }); subtotal += markup; }
-    } else {
-      add(size + '" Seamless Gutter installed', gutterFt, size === '6' ? s.lf6 : s.lf5, 'ft');
-      add('Downspouts installed', qty(list, 'dsFt'), s.dsFt, 'ft');
-      add('Miters / Corners', qty(list, 'miters'), s.miter);
-    }
+    add(size + '" Seamless Gutter', gutterFt, size === '6' ? s.d_lf6 : s.d_lf5, 'ft');
+    add('Miters / Corners', qty(list, 'miters'), s.d_miter);
+    add('End Caps', qty(list, 'caps'), s.d_cap);
+    add('Hidden Hangers', qty(list, 'hangers'), s.d_hanger);
+    add('Downspout', qty(list, 'dsFt'), s.d_ds, 'ft');
+    add('Elbows', qty(list, 'elbows'), s.d_elbow);
+    add('Splash Blocks', qty(list, 'splash'), s.d_splash);
+    add('Instalação', gutterFt, s.d_labor, 'ft');
 
-    // margem escolhida no orçamento: entra antes do mínimo e do desconto
-    var mg = 0;
-    if (s.marginMode === 'value') mg = Number(s.marginValue) || 0;
-    else if (s.marginMode === 'pct') mg = subtotal * ((Number(s.marginPct) || 0) / 100);
-    if (mg > 0) {
-      lines.push({ name: 'Margem comercial', qty: 1, unit: '', unitPrice: mg, total: mg });
-      subtotal += mg;
+    var cost = subtotal;                       // custo + mão de obra, antes da margem
+
+    // margem: só percentual, aplicada sobre o custo
+    var margin = 0;
+    if (s.marginMode === 'pct') {
+      margin = cost * ((Number(s.marginPct) || 0) / 100);
+      if (margin > 0) {
+        lines.push({ name: 'Margem comercial', qty: 1, unit: '', unitPrice: margin, total: margin });
+        subtotal += margin;
+      }
     }
 
     var minApplied = false;
@@ -190,6 +183,9 @@
 
     return {
       lines: lines,
+      cost: cost,
+      margin: margin,
+      marginAfterDiscount: margin - discount,
       subtotal: subtotal,
       minApplied: minApplied,
       discount: discount,
