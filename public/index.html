@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.25</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.26</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -352,10 +352,10 @@
       </div>
       <span class="field-label" style="margin-top:14px">Margem neste orçamento</span>
       <div class="status-row" id="margin-row">
-        <button class="st-btn" data-margin="none">Nenhuma</button>
-        <button class="st-btn" data-margin="value">Valor</button>
-        <button class="st-btn" data-margin="pct">Percentual</button>
+        <button class="st-btn" data-margin="none">Sem margem</button>
+        <button class="st-btn" data-margin="pct">Aplicar margem</button>
       </div>
+      <div class="margin-box" id="margin-box"></div>
       <div class="quick-row">
         <button class="qk" data-qk="client">Editar cliente</button>
         <button class="qk" data-qk="map">Rever medições</button>
@@ -414,22 +414,7 @@
 
     <h3 class="section-title">Preços de venda</h3>
     <div class="card">
-      <div class="seg" id="seg-mode">
-        <button type="button" class="seg-btn is-on" data-mode="simple">Preço por pé</button>
-        <button type="button" class="seg-btn" data-mode="detail">Item a item</button>
-      </div>
-      <div id="price-simple">
-        <div class="row-2">
-          <label class="field"><span>Calha 5" instalada ($/ft)</span><input type="number" id="p-lf5" step="0.25" inputmode="decimal"></label>
-          <label class="field"><span>Calha 6" instalada ($/ft)</span><input type="number" id="p-lf6" step="0.25" inputmode="decimal"></label>
-        </div>
-        <div class="row-2">
-          <label class="field"><span>Downspout ($/ft)</span><input type="number" id="p-ds" step="0.25" inputmode="decimal"></label>
-          <label class="field"><span>Canto / miter ($)</span><input type="number" id="p-miter" step="1" inputmode="decimal"></label>
-        </div>
-        <p class="hint">No modo “preço por pé”, hangers, end caps, parafusos e vedação já estão embutidos no valor do pé.</p>
-      </div>
-      <div id="price-detail" hidden>
+      <div id="price-detail">
         <div class="row-2">
           <label class="field"><span>Calha 5" material ($/ft)</span><input type="number" id="d-lf5" step="0.25" inputmode="decimal"></label>
           <label class="field"><span>Calha 6" material ($/ft)</span><input type="number" id="d-lf6" step="0.25" inputmode="decimal"></label>
@@ -446,17 +431,11 @@
           <label class="field"><span>Hanger ($)</span><input type="number" id="d-hanger" step="0.25" inputmode="decimal"></label>
           <label class="field"><span>Splash block ($)</span><input type="number" id="d-splash" step="0.5" inputmode="decimal"></label>
         </div>
-        <div class="row-2">
-          <label class="field"><span>Mão de obra ($/ft)</span><input type="number" id="d-labor" step="0.25" inputmode="decimal"></label>
-          <label class="field"><span>Margem (%)</span><input type="number" id="d-markup" step="1" inputmode="decimal"></label>
-        </div>
+        <label class="field"><span>Mão de obra ($/ft)</span><input type="number" id="d-labor" step="0.25" inputmode="decimal"></label>
       </div>
       <label class="field"><span>Valor mínimo do serviço ($)</span><input type="number" id="p-min" step="10" inputmode="decimal"></label>
-      <div class="row-2">
-        <label class="field"><span>Minha margem ($)</span><input type="number" id="p-mval" step="25" inputmode="decimal"></label>
-        <label class="field"><span>Minha margem (%)</span><input type="number" id="p-mpct" step="1" inputmode="decimal"></label>
-      </div>
-      <p class="hint">Ficam guardadas as duas. Na tela do orçamento você escolhe qual aplicar naquele trabalho — ou nenhuma.</p>
+      <label class="field"><span>Minha margem (%)</span><input type="number" id="p-mpct" step="1" inputmode="decimal"></label>
+      <p class="hint">Aplicada sobre o custo. Na tela do orçamento você liga ou desliga, e vê em dólar quanto sobra — inclusive depois do desconto.</p>
     </div>
 
     <h3 class="section-title">Regras de cálculo</h3>
@@ -503,7 +482,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.25</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.26</b></p>
   </div>
 </section>
 
