@@ -864,53 +864,191 @@
     return rec(0, pts.length - 1);
   }
 
-  var pickMode = false;
+  /* ---------- selecionar a casa por retângulo ----------
+     Você marca os dois cantos de um retângulo em volta da casa. Dentro dele o
+     telhado é a cor dominante — agrupamos os pixels em 3 grupos de cor e
+     ficamos com o grupo que manda no centro. Isso resolve telhado com um lado
+     no sol e outro na sombra, que o crescimento por cor não dava conta. */
+
+  // k-médias simples em RGB
+  function kmeans(samples, k, iters) {
+    var cent = [];
+    for (var i = 0; i < k; i++) {
+      var s = samples[Math.floor(i * (samples.length - 1) / Math.max(1, k - 1))];
+      cent.push([s[0], s[1], s[2]]);
+    }
+    for (var it = 0; it < iters; it++) {
+      var sum = [], cnt = [];
+      for (var c = 0; c < k; c++) { sum.push([0, 0, 0]); cnt.push(0); }
+      for (var j = 0; j < samples.length; j++) {
+        var p = samples[j], bi = 0, bd = 1e12;
+        for (var c2 = 0; c2 < k; c2++) {
+          var dr = p[0] - cent[c2][0], dg = p[1] - cent[c2][1], db = p[2] - cent[c2][2];
+          var d2 = dr * dr + dg * dg + db * db;
+          if (d2 < bd) { bd = d2; bi = c2; }
+        }
+        sum[bi][0] += p[0]; sum[bi][1] += p[1]; sum[bi][2] += p[2]; cnt[bi]++;
+      }
+      for (var c3 = 0; c3 < k; c3++) {
+        if (!cnt[c3]) continue;
+        cent[c3] = [sum[c3][0] / cnt[c3], sum[c3][1] / cnt[c3], sum[c3][2] / cnt[c3]];
+      }
+    }
+    return cent;
+  }
+
+  function nearest(cent, r, g, b) {
+    var bi = 0, bd = 1e12;
+    for (var i = 0; i < cent.length; i++) {
+      var dr = r - cent[i][0], dg = g - cent[i][1], db = b - cent[i][2];
+      var d2 = dr * dr + dg * dg + db * db;
+      if (d2 < bd) { bd = d2; bi = i; }
+    }
+    return bi;
+  }
+
+  // mantém só a mancha ligada ao centro
+  function keepCentral(mask, W, H, cx, cy) {
+    var out = new Uint8Array(W * H);
+    if (!mask[cy * W + cx]) {                      // centro fora: procura perto
+      var found = false;
+      for (var r = 1; r < Math.min(W, H) / 3 && !found; r += 2) {
+        for (var a = 0; a < 16 && !found; a++) {
+          var x = Math.round(cx + r * Math.cos(a * Math.PI / 8));
+          var y = Math.round(cy + r * Math.sin(a * Math.PI / 8));
+          if (x > 0 && y > 0 && x < W && y < H && mask[y * W + x]) { cx = x; cy = y; found = true; }
+        }
+      }
+      if (!found) return { mask: out, area: 0 };
+    }
+    var st = [cy * W + cx], n = 0;
+    out[cy * W + cx] = 1;
+    while (st.length) {
+      var o = st.pop(); n++;
+      var y0 = (o / W) | 0, x0 = o % W;
+      for (var k = 0; k < 4; k++) {
+        var nx = x0 + (k === 0 ? 1 : k === 1 ? -1 : 0);
+        var ny = y0 + (k === 2 ? 1 : k === 3 ? -1 : 0);
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        var oo = ny * W + nx;
+        if (out[oo] || !mask[oo]) continue;
+        out[oo] = 1; st.push(oo);
+      }
+    }
+    return { mask: out, area: n };
+  }
+
+  // extrai o telhado dentro do retângulo
+  function roofFromRect(img, x0, y0, x1, y1) {
+    var W = img.width, d = img.data;
+    var rw = x1 - x0, rh = y1 - y0;
+    if (rw < 12 || rh < 12) return null;
+
+    // amostra para o agrupamento
+    var samples = [], step = Math.max(1, Math.round(Math.sqrt(rw * rh / 3000)));
+    for (var y = y0; y < y1; y += step) {
+      for (var x = x0; x < x1; x += step) {
+        var o = (y * W + x) * 4;
+        samples.push([d[o], d[o + 1], d[o + 2]]);
+      }
+    }
+    if (samples.length < 12) return null;
+    samples.sort(function (a, b) { return (a[0] + a[1] + a[2]) - (b[0] + b[1] + b[2]); });
+    var K = 5;
+    var cent = kmeans(samples, K, 10);
+
+    /* Quais grupos são telhado: todos os que aparecem de verdade no miolo do
+       retângulo. Telhado com um lado no sol e outro na sombra cai em dois grupos
+       diferentes — e os dois estão no meio. Grama e rua ficam nas bordas, então
+       não entram. */
+    var mx0 = Math.round(x0 + rw * 0.28), mx1 = Math.round(x0 + rw * 0.72);
+    var my0 = Math.round(y0 + rh * 0.28), my1 = Math.round(y0 + rh * 0.72);
+    var votes = new Array(K).fill(0), totalV = 0;
+    for (var y2 = my0; y2 < my1; y2 += 2) {
+      for (var x2 = mx0; x2 < mx1; x2 += 2) {
+        var o2 = (y2 * W + x2) * 4;
+        votes[nearest(cent, d[o2], d[o2 + 1], d[o2 + 2])]++;
+        totalV++;
+      }
+    }
+    if (!totalV) return null;
+    var isRoof = votes.map(function (v) { return v / totalV >= 0.12; });
+    if (!isRoof.some(Boolean)) isRoof[votes.indexOf(Math.max.apply(null, votes))] = true;
+
+    // máscara: pixels dos grupos de telhado, só dentro do retângulo
+    var m = new Uint8Array(rw * rh);
+    for (var y3 = 0; y3 < rh; y3++) {
+      for (var x3 = 0; x3 < rw; x3++) {
+        var o3 = ((y3 + y0) * W + (x3 + x0)) * 4;
+        if (isRoof[nearest(cent, d[o3], d[o3 + 1], d[o3 + 2])]) m[y3 * rw + x3] = 1;
+      }
+    }
+
+    var obj = { mask: m, w: rw, h: rh };
+    closeMask(obj, 2);
+    var kept = keepCentral(obj.mask, rw, rh, Math.round(rw / 2), Math.round(rh / 2));
+    if (kept.area < rw * rh * 0.06) return null;
+    obj.mask = kept.mask; obj.area = kept.area;
+    return obj;
+  }
+
+  var pickMode = false, rectA = null, rectLayer = null;
 
   function startPickHouse() {
     if (!map) return;
-    pickMode = true;
+    pickMode = true; rectA = null;
+    if (rectLayer) { map.removeLayer(rectLayer); rectLayer = null; }
     setMapMode('draw');
-    toast('Toque no meio do telhado da casa do cliente.');
+    toast('Toque num canto do terreno e depois no canto oposto, cercando a casa.');
   }
 
   function pickHouseAt(latlng) {
+    if (!rectA) {
+      rectA = latlng;
+      if (rectLayer) map.removeLayer(rectLayer);
+      rectLayer = L.circleMarker(latlng, { radius: 7, color: '#2BE0C0', weight: 3 }).addTo(map);
+      toast('Agora o canto oposto.');
+      return;
+    }
+    var b1 = L.latLngBounds(rectA, latlng);
+    if (rectLayer) map.removeLayer(rectLayer);
+    rectLayer = L.rectangle(b1, { color: '#2BE0C0', weight: 2, dashArray: '8 6', fill: false }).addTo(map);
     pickMode = false;
+    rectA = null;
+    extractRoof(b1);
+  }
+
+  function extractRoof(bounds) {
     toast('Lendo o telhado…');
     mapViewCanvas().then(function (v) {
       if (!v) { toast('Aproxime o mapa e tente de novo.'); return; }
       var img = grabPixels(v.canvas);
       if (!img) { toast('Não consegui ler esta camada de imagem.'); return; }
 
-      // ponto tocado, em pixel do recorte
-      var pt = v.toPixel(latlng.lat, latlng.lng);
-      var sx = Math.round(pt.x), sy = Math.round(pt.y);
-      if (sx < 1 || sy < 1 || sx >= img.width - 1 || sy >= img.height - 1) {
-        toast('Toque dentro da imagem.'); return;
+      var p1 = v.toPixel(bounds.getNorth(), bounds.getWest());
+      var p2 = v.toPixel(bounds.getSouth(), bounds.getEast());
+      var x0 = Math.max(1, Math.round(Math.min(p1.x, p2.x)));
+      var x1 = Math.min(img.width - 1, Math.round(Math.max(p1.x, p2.x)));
+      var y0 = Math.max(1, Math.round(Math.min(p1.y, p2.y)));
+      var y1 = Math.min(img.height - 1, Math.round(Math.max(p1.y, p2.y)));
+
+      var roof = roofFromRect(img, x0, y0, x1, y1);
+      if (!roof) {
+        toast('Não separei o telhado aí. Refaça o retângulo mais justo na casa.');
+        return;
       }
 
-      // tolerância crescente até pegar uma área que faça sentido para uma casa
-      var best = null;
-      [30, 42, 55, 70].forEach(function (tol) {
-        if (best) return;
-        var m = growRegion(img, sx, sy, tol);
-        var frac = m.area / (img.width * img.height);
-        if (frac > 0.012 && frac < 0.32) best = m;
-      });
-      if (!best) { toast('Não consegui separar o telhado. Toque numa parte mais uniforme.'); return; }
-
-      closeMask(best, 2);
-      var contour = traceContour(best);
-      if (contour.length < 8) { toast('Contorno muito pequeno. Tente outro ponto.'); return; }
-
-      var poly = simplify(contour, Math.max(3, Math.round(Math.sqrt(best.area) / 22)));
-      var ll = poly.map(function (p) { return v.toLatLng(p.x, p.y); });
+      var contour = traceContour(roof);
+      if (contour.length < 8) { toast('Contorno fraco. Tente um retângulo mais justo.'); return; }
+      var poly = simplify(contour, Math.max(3, Math.round(Math.sqrt(roof.area) / 20)));
 
       mapCands = [];
+      var ll = poly.map(function (p) { return v.toLatLng(p.x + x0, p.y + y0); });
       for (var i = 1; i < ll.length; i++) {
         if (Calc.haversineFt(ll[i - 1], ll[i]) < 6) continue;
         mapCands.push([ll[i - 1], ll[i]]);
       }
-      if (mapCands.length < 2) { toast('Contorno fraco aqui. Tente outro ponto do telhado.'); return; }
+      if (mapCands.length < 2) { toast('Contorno fraco aqui. Refaça o retângulo.'); return; }
       drawCands();
       toast(mapCands.length + ' lados do telhado. Toque só nos que levam calha.');
     }).catch(function () { toast('Não consegui analisar agora.'); });
@@ -977,6 +1115,8 @@
   function clearCands() {
     mapCands = [];
     if (candLayer) candLayer.clearLayers();
+    if (rectLayer) { map.removeLayer(rectLayer); rectLayer = null; }
+    pickMode = false; rectA = null;
   }
 
   /* ---------- botões do mapa ---------- */
