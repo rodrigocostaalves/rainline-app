@@ -3,16 +3,26 @@
   "main": "worker/index.js",
   "compatibility_date": "2026-08-01",
 
+  // arquivos do app (o Worker só recebe o que não for arquivo estático)
   "assets": {
     "directory": "./public",
     "binding": "ASSETS"
   },
 
+  // banco de dados — troque database_id pelo ID que o Cloudflare te der
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "rainline",
-      "database_id": "a6b39eab-c00b-4f12-b6e6-7e189071fbe1"
+      "database_id": "COLE_AQUI_O_ID_DA_SUA_BASE"
+    }
+  ],
+
+  // armazenamento das fotos
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "rainline-photos"
     }
   ]
 }
