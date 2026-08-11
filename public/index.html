@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.26</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.27</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -137,7 +137,8 @@
         <button class="mode-btn" data-mapmode="edit">Ajustar</button>
       </div>
       <div class="dock-scroll" id="tools-draw">
-        <button class="rail-btn rail-go" id="btn-detect">Detectar telhado</button>
+        <button class="rail-btn rail-go" id="btn-detect">Selecionar casa</button>
+        <button class="rail-btn" id="btn-accept-all">Aceitar lados</button>
         <button class="rail-btn" id="btn-parts">Medições <span class="parts-badge" id="parts-count">0</span></button>
         <button class="rail-btn" id="btn-undo">Desfazer</button>
         <button class="rail-btn" id="btn-newline">Nova linha</button>
@@ -365,7 +366,7 @@
     <div class="card" id="quote-box"></div>
     <div class="row-2">
       <label class="field"><span>Desconto ($)</span><input type="number" id="quote-discount" value="0" step="1" inputmode="decimal"></label>
-      <label class="field"><span>Imposto (%)</span><input type="number" id="quote-tax" value="0" step="0.1" inputmode="decimal"></label>
+      <label class="field"><span>Imposto (%)</span><input type="number" id="quote-tax" value="0" step="0.01" min="0" inputmode="decimal" placeholder="6.5"></label>
     </div>
     <div class="total-card">
       <span>Total</span><b id="quote-total">$0.00</b>
@@ -482,7 +483,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.26</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.27</b></p>
   </div>
 </section>
 
