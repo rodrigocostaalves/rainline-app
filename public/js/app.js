@@ -258,7 +258,7 @@
   function newJob() {
     job = {
       id: 'Q' + Date.now().toString(36).toUpperCase(),
-      client: {}, runs: [], manual: [], overrides: {}, status: 'draft', marginMode: 'pct',
+      client: {}, runs: [], manual: [], overrides: {}, status: 'draft', marginMode: 'pct', layerId: null,
       size: 5, stories: 1, color: '', discount: 0, taxPct: 0, savedAt: null
     };
     $('#form-job').reset();
@@ -496,6 +496,7 @@
       if (pickMode) { pickHouseAt(e.latlng); return; }
       if (mapMode === 'edit') { select(null); return; }
       if (!job.runs.length) job.runs.push({ points: [] });
+      if (!job.layerId) job.layerId = LAYERS[layerIdx].id;   // camada onde foi medido
       var i = (selected != null && job.runs[selected]) ? selected : job.runs.length - 1;
       job.runs[i].points.push({ lat: e.latlng.lat, lng: e.latlng.lng });
       renderDraw();
@@ -812,7 +813,9 @@
 
   // monta o recorte no maior zoom possível, com folga em volta
   function cropTiles(b) {
-    var def = LAYERS[layerIdx];
+    var def = null;
+    if (job.layerId) LAYERS.forEach(function (l) { if (l.id === job.layerId) def = l; });
+    if (!def) def = LAYERS[layerIdx];
     if (def.type !== 'xyz') def = LAYERS[0];
     var padLat = (b.getNorth() - b.getSouth()) * 0.12;
     var padLng = (b.getEast() - b.getWest()) * 0.12;
@@ -1090,6 +1093,7 @@
       if (p.x < 0 || p.y < 0 || p.x > cp.w || p.y > cp.h) return;
       if (!job.runs.length) job.runs.push({ points: [], level: 1 });
       var run = job.runs[job.runs.length - 1];
+      if (!job.layerId) job.layerId = LAYERS[layerIdx].id;
       p = orthoSnap(run, p);
       var ll = cp.toLatLng(p.x, p.y);
       run.points.push({ lat: ll.lat, lng: ll.lng });
@@ -1260,7 +1264,15 @@
 
   $('#btn-layer').addEventListener('click', function () {
     applyLayer(layerIdx + 1);
-    toast('Imagem: ' + LAYERS[layerIdx].name + '. Se ficar em branco, toque de novo.');
+    var medido = job && job.runs.some(function (r) { return r.points.length > 1; });
+    if (medido && job.layerId && job.layerId !== LAYERS[layerIdx].id) {
+      var nome = '';
+      LAYERS.forEach(function (l) { if (l.id === job.layerId) nome = l.name; });
+      toast('As linhas foram medidas em ' + nome + '. As camadas têm pequeno desvio entre si — ' +
+            'volte para ' + nome + ' antes de ajustar pontos.');
+    } else {
+      toast('Imagem: ' + LAYERS[layerIdx].name + '. Se ficar em branco, toque de novo.');
+    }
   });
 
   $('#btn-enhance').addEventListener('click', function () {
@@ -2639,6 +2651,9 @@
     initMap();
     updateTape();
     if (!map) return;
+    if (job.layerId && LAYERS[layerIdx].id !== job.layerId) {
+      LAYERS.forEach(function (l, i) { if (l.id === job.layerId) applyLayer(i); });
+    }
     setMapMode('draw');
     var pts = [];
     job.runs.forEach(function (r) { r.points.forEach(function (p) { pts.push([p.lat, p.lng]); }); });
@@ -2807,8 +2822,12 @@
     var ty0 = Math.floor(y0 / 256), ty1 = Math.floor(y1 / 256);
     if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 49) return Promise.resolve(null);
 
-    var def = LAYERS[layerIdx];
-    if (def.type !== 'xyz') def = LAYERS[0];              // camadas de condado não servem aqui
+    // usa a MESMA camada em que o orçamento foi medido: camadas diferentes têm
+    // pequenos deslocamentos entre si, e a marcação sairia fora do telhado
+    var def = null;
+    if (job.layerId) LAYERS.forEach(function (l) { if (l.id === job.layerId) def = l; });
+    if (!def) def = LAYERS[layerIdx];
+    if (def.type !== 'xyz') def = LAYERS[0];
     var nz = Math.min(z, def.max);
     var scale = Math.pow(2, z - nz);
 
