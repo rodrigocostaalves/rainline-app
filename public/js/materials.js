@@ -160,9 +160,12 @@
     add('Downspout', qty(list, 'dsFt'), s.d_ds, 'ft');
     add('Elbows', qty(list, 'elbows'), s.d_elbow);
     add('Splash Blocks', qty(list, 'splash'), s.d_splash);
-    add('Instalação', gutterFt, s.d_labor, 'ft');
+    // mão de obra: entra no custo, mas fica fora da lista que o cliente vê
+    var labor = gutterFt * (Number(s.d_labor) || 0);
+    subtotal += labor;
 
-    var cost = subtotal;                       // custo + mão de obra, antes da margem
+    var material = subtotal - labor;           // só material
+    var cost = subtotal;                       // material + mão de obra
 
     // margem: só percentual, aplicada sobre o custo
     var margin = 0;
@@ -183,6 +186,8 @@
 
     return {
       lines: lines,
+      material: material,
+      labor: labor,
       cost: cost,
       margin: margin,
       marginAfterDiscount: margin - discount,

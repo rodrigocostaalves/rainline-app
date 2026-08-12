@@ -2711,7 +2711,7 @@
       '<div class="q-head"><h3>' + (c.name || 'Cliente') + '</h3>' +
       '<p>' + (fullAddress() || '—') + '</p>' +
       '<p>' + ft(d.m.feet) + ' · ' + job.size + '" gutter · ' + d.m.corners + ' cantos · ' + Calc.qty(d.list, 'dsCount') + ' downspouts</p></div>' +
-      p.lines.map(function (l) {
+      p.lines.filter(function (l) { return !/^Margem/.test(l.name); }).map(function (l) {
         return '<div class="q-line"><span>' + l.name + '<br><span class="qty">' +
           (l.unit ? l.qty + ' ' + l.unit + ' × ' + money(l.unitPrice) : '') + '</span></span><span>' + money(l.total) + '</span></div>';
       }).join('') +
@@ -2729,7 +2729,10 @@
       var restante = p.margin - (p.discount || 0);
       var pctReal = p.cost > 0 ? (restante / p.cost * 100) : 0;
       mb.innerHTML =
-        '<div class="mb-row"><span>Custo + mão de obra</span><b>' + money(p.cost) + '</b></div>' +
+        '<div class="mb-row"><span>Material</span><b>' + money(p.material) + '</b></div>' +
+        '<div class="mb-row"><span>Mão de obra</span><b>' + money(p.labor) + '</b></div>' +
+        '<div class="mb-row" style="border-top:1px dashed var(--line);padding-top:5px">' +
+        '<span>Custo total</span><b>' + money(p.cost) + '</b></div>' +
         '<div class="mb-row"><span>Margem ' + pctTxt + '</span><b>' + money(p.margin) + '</b></div>' +
         (p.discount ? '<div class="mb-row"><span>Desconto dado</span><b>-' + money(p.discount) + '</b></div>' : '') +
         '<div class="mb-row"><span><b>Sobra para você</b></span>' +
@@ -2739,7 +2742,11 @@
           ? 'O desconto comeu toda a margem — este trabalho sai no prejuízo.'
           : 'Equivale a ' + pctReal.toFixed(1) + '% sobre o custo. Só você vê isto.') + '</small>';
     } else {
-      mb.innerHTML = '<div class="mb-row"><span>Custo + mão de obra</span><b>' + money(p.cost) + '</b></div>' +
+      mb.innerHTML =
+        '<div class="mb-row"><span>Material</span><b>' + money(p.material) + '</b></div>' +
+        '<div class="mb-row"><span>Mão de obra</span><b>' + money(p.labor) + '</b></div>' +
+        '<div class="mb-row" style="border-top:1px dashed var(--line);padding-top:5px">' +
+        '<span><b>Custo total</b></span><b>' + money(p.cost) + '</b></div>' +
         '<small>Sem margem aplicada: você está vendendo pelo custo.</small>';
     }
   }
@@ -3010,8 +3017,10 @@
 
   function buildPrint(mapPng, photoPngs) {
     var p = job._price, l = job._list, c = job.client, m = job._m;
+    // o cliente vê os itens de material com mão de obra e margem já embutidas
     var shown = p.lines.filter(function (x) { return !/^Margem/.test(x.name); });
-    var hidden = p.lines.reduce(function (a, x) { return a + (/^Margem/.test(x.name) ? x.total : 0); }, 0);
+    var hidden = p.lines.reduce(function (a, x) { return a + (/^Margem/.test(x.name) ? x.total : 0); }, 0)
+                 + (p.labor || 0);
     if (hidden > 0) {
       var base = shown.reduce(function (a, x) { return a + x.total; }, 0) || 1;
       shown = shown.map(function (x) {
@@ -3098,15 +3107,125 @@
       });
   });
 
+  // gera o PDF e compartilha o arquivo; se o aparelho não permitir, manda o texto
   $('#btn-share').addEventListener('click', function () {
     var p = job._price;
     var txt = (settings.company || 'Gutter estimate') + '\n' +
       (job.client.name || '') + ' — ' + fullAddress() + '\n' +
       ft(job._m.feet) + ' of ' + job.size + '" gutter, ' + Calc.qty(job._list, 'dsCount') + ' downspouts, ' +
       job._m.corners + ' corners\nTotal: ' + money(p.total);
+
+    if (!window.jspdf) { toast('Sem internet para montar o PDF — mandando o resumo.'); shareText(txt); return; }
+    if (!navigator.share) { shareText(txt); return; }
+
+    toast('Montando o PDF…');
+    var shots = (job.manual || []).map(function (e) {
+      return photoImage(e).then(function (png) { return { png: png, level: e.level, feet: e.feet }; });
+    });
+    Promise.all([mapImage()].concat(shots))
+      .then(function (all) { return sharePdf(all[0], all.slice(1), txt); })
+      .catch(function () { shareText(txt); });
+  });
+
+  function shareText(txt) {
     if (navigator.share) navigator.share({ title: 'Gutter Estimate', text: txt }).catch(function () {});
     else { navigator.clipboard.writeText(txt); toast('Resumo copiado.'); }
-  });
+  }
+
+  function sharePdf(mapPng, photoPngs, txt) {
+    var doc = new window.jspdf.jsPDF({ unit: 'pt', format: 'letter' });
+    var p = job._price, l = job._list, c = job.client, m = job._m;
+    var W = doc.internal.pageSize.getWidth(), M = 42, y = 52;
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(19);
+    doc.text(settings.company || 'Gutter Co.', M, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    doc.text('ESTIMATE  ' + job.id, W - M, y - 8, { align: 'right' });
+    doc.text(new Date().toLocaleDateString('en-US'), W - M, y + 4, { align: 'right' });
+    y += 10; doc.setLineWidth(1.6); doc.line(M, y, W - M, y); y += 20;
+
+    doc.setFontSize(9); doc.setTextColor(90);
+    doc.text('PREPARED FOR', M, y);
+    doc.text('JOB SITE', M + 170, y);
+    doc.text('MEASURED', M + 340, y);
+    doc.setTextColor(0); doc.setFontSize(10.5); y += 14;
+    doc.text(String(c.name || ''), M, y);
+    doc.text(doc.splitTextToSize(fullAddress() || '', 160), M + 170, y);
+    doc.text(ft(m.feet) + ' of ' + job.size + '" gutter', M + 340, y);
+    y += 13;
+    doc.text(String(c.phone || ''), M, y);
+    doc.text(m.corners + ' corners · ' + Calc.qty(l, 'dsCount') + ' downspouts', M + 340, y);
+    y += 26;
+
+    function shot(png, label) {
+      if (!png) return;
+      var iw = W - M * 2, ih = iw * 0.62;
+      if (y + ih > 700) { doc.addPage(); y = 52; }
+      doc.setFontSize(8.5); doc.setTextColor(90); doc.text(label, M, y); doc.setTextColor(0);
+      y += 8;
+      try { doc.addImage(png, 'JPEG', M, y, iw, ih); } catch (e) {}
+      doc.setDrawColor(160); doc.setLineWidth(0.6); doc.rect(M, y, iw, ih);
+      y += ih + 20;
+    }
+    shot(mapPng, 'AERIAL MEASUREMENT');
+    (photoPngs || []).forEach(function (o) {
+      shot(o.png, 'FACADE · ' + Math.round(o.feet) + ' FT');
+    });
+
+    if (y > 620) { doc.addPage(); y = 52; }
+    doc.setFontSize(8.5); doc.setTextColor(90); doc.text('SCOPE & PRICE', M, y); doc.setTextColor(0);
+    y += 6; doc.setLineWidth(1.2); doc.line(M, y, W - M, y); y += 16;
+
+    var shown = p.lines.filter(function (x) { return !/^Margem/.test(x.name); });
+    var hidden = p.lines.reduce(function (a, x) { return a + (/^Margem/.test(x.name) ? x.total : 0); }, 0)
+                 + (p.labor || 0);
+    var base = shown.reduce(function (a, x) { return a + x.total; }, 0) || 1;
+    doc.setFontSize(10);
+    shown.forEach(function (x) {
+      if (y > 720) { doc.addPage(); y = 52; }
+      var t = x.total * (1 + hidden / base);
+      doc.text(String(x.name), M, y);
+      doc.text(x.unit ? x.qty + ' ' + x.unit : '', M + 300, y);
+      doc.text(money(t), W - M, y, { align: 'right' });
+      doc.setDrawColor(215); doc.setLineWidth(0.5); doc.line(M, y + 5, W - M, y + 5);
+      y += 19;
+    });
+    if (p.discount) { doc.text('Discount', M, y); doc.text('-' + money(p.discount), W - M, y, { align: 'right' }); y += 19; }
+    if (p.tax) { doc.text('Tax', M, y); doc.text(money(p.tax), W - M, y, { align: 'right' }); y += 19; }
+
+    y += 6; doc.setLineWidth(1.6); doc.line(M, y, W - M, y); y += 22;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.text('Total', M, y); doc.text(money(p.total), W - M, y, { align: 'right' });
+
+    y += 30; doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(70);
+    var mat = l.filter(function (i) { return i.qty > 0; }).map(function (i) {
+      var n = EN[i.key] || i.name;
+      if (i.key === 'gutter') n = job.size + '" ' + n;
+      return i.qty + ' ' + i.unit + ' — ' + n;
+    }).join(' · ');
+    doc.text(doc.splitTextToSize('Materials included: ' + mat + '.', W - M * 2), M, y);
+    y += 34;
+    doc.text(doc.splitTextToSize(
+      'Estimate valid for 30 days. Aerial lengths taken from orthorectified imagery; facade lengths ' +
+      'scaled from a known reference in the photograph. Measurements verified on site before fabrication. ' +
+      'Final quantities may vary within 5%.', W - M * 2), M, y);
+    y += 40;
+    doc.text('Accepted by: ______________________________   Date: ____________', M, y);
+
+    var name = 'Estimate-' + (c.name || 'client').replace(/[^\w]+/g, '-') + '.pdf';
+    var blob = doc.output('blob');
+    var file = new File([blob], name, { type: 'application/pdf' });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: 'Gutter Estimate', text: txt })
+        .catch(function () {});
+    }
+    // sem suporte a arquivo: baixa o PDF e copia o resumo
+    var a2 = document.createElement('a');
+    a2.href = URL.createObjectURL(blob); a2.download = name; a2.click();
+    shareText(txt);
+    return Promise.resolve();
+  }
 
   /* ---------- clientes / histórico ---------- */
   function renderClients() {
