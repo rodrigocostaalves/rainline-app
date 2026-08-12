@@ -853,7 +853,9 @@
             var dx = (tx - tx0) * 256, dy = (ty - ty0) * 256;
             if (scale === 1) { g.drawImage(im, dx, dy, 256, 256); return; }
             var sub = 256 / scale;
-            g.drawImage(im, (tx % scale) * sub, (ty % scale) * sub, sub, sub, dx, dy, 256, 256);
+            var mx = ((tx % scale) + scale) % scale;   // resto sempre positivo
+            var my = ((ty % scale) + scale) % scale;
+            g.drawImage(im, mx * sub, my * sub, sub, sub, dx, dy, 256, 256);
           }));
         })(tx, ty);
       }
@@ -1274,38 +1276,6 @@
     if (m.feet < 1) { toast('Desenhe pelo menos uma linha sobre o beiral.'); return; }
     job.overrides = {};
     go('materials');
-  });
-
-  /* ---------- exemplo pronto (para testar) ---------- */
-  $('#btn-demo').addEventListener('click', function () {
-    newJob();
-    job.client = {
-      name: 'John & Mary Carter', phone: '(407) 555-0142', email: 'carter@example.com',
-      address: '842 Oakfield Ln', city: 'Winter Garden', state: 'FL', zip: '34787', notes: 'Exemplo de demonstração'
-    };
-    job.stories = 1; job.color = 'White';
-    // frente em L + fundo reto — aprox. 156 ft
-    job.runs = [
-      { points: [
-        { lat: 28.565300, lng: -81.586200 },
-        { lat: 28.565300, lng: -81.586037 },
-        { lat: 28.565251, lng: -81.586037 },
-        { lat: 28.565251, lng: -81.585962 }
-      ] },
-      { points: [
-        { lat: 28.565190, lng: -81.586200 },
-        { lat: 28.565190, lng: -81.586006 }
-      ] }
-    ];
-    job.center = { lat: 28.565245, lng: -81.586090 };
-    $('#map-title').textContent = job.client.name;
-    go('map');
-    initMap();
-    if (!map) return;
-    map.setView([job.center.lat, job.center.lng], 21);
-    setMapMode('draw');
-    renderDraw();
-    toast('Exemplo carregado. Arraste os pontos amarelos para ver a medida mudar.');
   });
 
   /* ---------- medições (resumo por andar) ---------- */
@@ -2860,7 +2830,9 @@
             if (scale === 1) { g.drawImage(im, dx, dy, 256, 256); return; }
             var sub = 256 / scale;                        // recorte do ladrilho de baixo
             g.imageSmoothingEnabled = true;
-            g.drawImage(im, (tx % scale) * sub, (ty % scale) * sub, sub, sub, dx, dy, 256, 256);
+            var mx = ((tx % scale) + scale) % scale;   // resto sempre positivo
+            var my = ((ty % scale) + scale) % scale;
+            g.drawImage(im, mx * sub, my * sub, sub, sub, dx, dy, 256, 256);
           }));
         })(tx, ty);
       }
@@ -2871,19 +2843,21 @@
       function P(p) { return [lngToPx(p.lng, WS) - ox, latToPx(p.lat, WS) - oy]; }
 
       g.lineCap = 'round'; g.lineJoin = 'round';
+      var LW = Math.max(3, Math.round(Math.min(W, H) / 260));
+      var FS = Math.max(11, Math.round(Math.min(W, H) / 90));
       job.runs.forEach(function (run) {
         if (run.points.length < 2) return;
         var col = levelColor(run.level);
-        g.strokeStyle = 'rgba(14,19,23,.55)'; g.lineWidth = 11;
+        g.strokeStyle = 'rgba(14,19,23,.55)'; g.lineWidth = LW * 2.2;
         g.beginPath();
         run.points.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
         g.stroke();
-        g.strokeStyle = col; g.lineWidth = 5;
+        g.strokeStyle = col; g.lineWidth = LW;
         g.beginPath();
         run.points.forEach(function (p, i) { var q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); });
         g.stroke();
 
-        g.font = '600 15px monospace';
+        g.font = '600 ' + FS + 'px monospace';
         for (var i = 1; i < run.points.length; i++) {
           var a = run.points[i - 1], b = run.points[i];
           var len = Calc.haversineFt(a, b) * settings.calibration;
@@ -2891,19 +2865,36 @@
           var A = P(a), B = P(b);
           var mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
           var txt = Math.round(len) + " ft";
-          var w = g.measureText(txt).width + 12;
-          g.fillStyle = 'rgba(14,19,23,.9)';
-          g.fillRect(mx - w / 2, my - 12, w, 24);
+          var w = g.measureText(txt).width + FS * 0.8;
+          g.fillStyle = 'rgba(14,19,23,.88)';
+          g.fillRect(mx - w / 2, my - FS * 0.85, w, FS * 1.7);
           g.fillStyle = col;
-          g.fillText(txt, mx - w / 2 + 6, my + 6);
+          g.fillText(txt, mx - w / 2 + FS * 0.4, my + FS * 0.42);
         }
         run.points.forEach(function (p) {
           var q = P(p);
-          g.fillStyle = col; g.beginPath(); g.arc(q[0], q[1], 6, 0, 6.284); g.fill();
-          g.strokeStyle = '#0E1317'; g.lineWidth = 2.5; g.stroke();
+          g.fillStyle = col; g.beginPath(); g.arc(q[0], q[1], LW * 1.2, 0, 6.284); g.fill();
+          g.strokeStyle = '#0E1317'; g.lineWidth = LW * 0.5; g.stroke();
         });
       });
 
+      // recorta só onde há desenho, com folga — evita meia quadra em volta
+      var pxs = [];
+      job.runs.forEach(function (r) { r.points.forEach(function (p) { pxs.push(P(p)); }); });
+      if (pxs.length > 1) {
+        var xs = pxs.map(function (q) { return q[0]; }), ys = pxs.map(function (q) { return q[1]; });
+        var pad = Math.max(40, (Math.max.apply(null, xs) - Math.min.apply(null, xs)) * 0.16);
+        var cx0 = Math.max(0, Math.floor(Math.min.apply(null, xs) - pad));
+        var cy0 = Math.max(0, Math.floor(Math.min.apply(null, ys) - pad));
+        var cx1 = Math.min(W, Math.ceil(Math.max.apply(null, xs) + pad));
+        var cy1 = Math.min(H, Math.ceil(Math.max.apply(null, ys) + pad));
+        if (cx1 - cx0 > 60 && cy1 - cy0 > 60) {
+          var out = document.createElement('canvas');
+          out.width = cx1 - cx0; out.height = cy1 - cy0;
+          out.getContext('2d').drawImage(cv, cx0, cy0, out.width, out.height, 0, 0, out.width, out.height);
+          try { return out.toDataURL('image/jpeg', 0.88); } catch (e) { return null; }
+        }
+      }
       try { return cv.toDataURL('image/jpeg', 0.85); } catch (e) { return null; }
     });
   }
