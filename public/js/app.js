@@ -34,6 +34,7 @@
     window.scrollTo(0, 0);
     if (name === 'home') renderHome();
     if (name === 'map' && map) setTimeout(function () { map.invalidateSize(); }, 60);
+    if (name === 'crop') setTimeout(function () { computeCropFit(); clampCrop(); drawCrop(); }, 60);
     if (name === 'parts') renderParts();
     if (name === 'materials') renderMaterials();
     if (name === 'quote') renderQuote();
@@ -746,253 +747,21 @@
     });
   }
 
-  /* ---------- selecionar a casa e extrair o telhado ----------
-     Em vez de procurar retas na tela inteira (que acha vizinho, calçada e rua),
-     você toca na casa. O app cresce uma região a partir dali pela cor do
-     telhado, fecha os buracos da textura de telha, contorna a mancha e
-     simplifica o contorno em um polígono. Cada lado vira uma candidata. */
-
-  function grabPixels(cv) {
-    var g = cv.getContext('2d', { willReadFrequently: true });
-    try { return g.getImageData(0, 0, cv.width, cv.height); } catch (e) { return null; }
-  }
-
-  // cresce a região a partir do ponto tocado
-  function growRegion(img, sx, sy, tol) {
-    var W = img.width, H = img.height, d = img.data;
-    function px(x, y) { var o = (y * W + x) * 4; return [d[o], d[o + 1], d[o + 2]]; }
-
-    // cor de partida: média de uma janela, para não depender de um pixel solto
-    var r = 0, g2 = 0, b = 0, n = 0;
-    for (var y = Math.max(0, sy - 3); y <= Math.min(H - 1, sy + 3); y++) {
-      for (var x = Math.max(0, sx - 3); x <= Math.min(W - 1, sx + 3); x++) {
-        var c = px(x, y); r += c[0]; g2 += c[1]; b += c[2]; n++;
-      }
-    }
-    r /= n; g2 /= n; b /= n;
-
-    var mask = new Uint8Array(W * H);
-    var stack = [sy * W + sx];
-    var count = 0, limit = Math.round(W * H * 0.35);
-    mask[sy * W + sx] = 1;
-
-    while (stack.length && count < limit) {
-      var o = stack.pop();
-      var y0 = (o / W) | 0, x0 = o % W;
-      count++;
-      for (var k = 0; k < 4; k++) {
-        var nx = x0 + (k === 0 ? 1 : k === 1 ? -1 : 0);
-        var ny = y0 + (k === 2 ? 1 : k === 3 ? -1 : 0);
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        var oo = ny * W + nx;
-        if (mask[oo]) continue;
-        var q = (oo) * 4;
-        var dr = d[q] - r, dg = d[q + 1] - g2, db = d[q + 2] - b;
-        if (dr * dr + dg * dg + db * db <= tol * tol) { mask[oo] = 1; stack.push(oo); }
-      }
-    }
-    return { mask: mask, w: W, h: H, area: count };
-  }
-
-  // fecha buracos da textura: dilata e depois encolhe
-  function closeMask(m, radius) {
-    var W = m.w, H = m.h, a = m.mask;
-    function pass(src, grow) {
-      var out = new Uint8Array(W * H);
-      for (var y = 0; y < H; y++) {
-        for (var x = 0; x < W; x++) {
-          var hit = grow ? 0 : 1;
-          for (var dy = -radius; dy <= radius && (grow ? !hit : hit); dy++) {
-            for (var dx = -radius; dx <= radius; dx++) {
-              var yy = y + dy, xx = x + dx;
-              var v = (yy < 0 || xx < 0 || yy >= H || xx >= W) ? 0 : src[yy * W + xx];
-              if (grow && v) { hit = 1; break; }
-              if (!grow && !v) { hit = 0; break; }
-            }
-          }
-          out[y * W + x] = hit;
-        }
-      }
-      return out;
-    }
-    var g = pass(a, true);
-    m.mask = pass(g, false);
-    return m;
-  }
-
-  // contorna a mancha (rastreio de Moore)
-  function traceContour(m) {
-    var W = m.w, H = m.h, a = m.mask;
-    var start = -1;
-    for (var i = 0; i < a.length && start < 0; i++) if (a[i]) start = i;
-    if (start < 0) return [];
-    var sx = start % W, sy = (start / W) | 0;
-    var dirs = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
-    var pts = [], cx = sx, cy = sy, dir = 6, guard = 0;
-    do {
-      pts.push({ x: cx, y: cy });
-      var found = false;
-      for (var k = 0; k < 8; k++) {
-        var nd = (dir + 6 + k) % 8;
-        var nx = cx + dirs[nd][0], ny = cy + dirs[nd][1];
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        if (a[ny * W + nx]) { cx = nx; cy = ny; dir = nd; found = true; break; }
-      }
-      if (!found) break;
-    } while ((cx !== sx || cy !== sy) && ++guard < 200000);
-    return pts;
-  }
-
-  // Douglas-Peucker: transforma milhares de pixels em poucos cantos
-  function simplify(pts, eps) {
-    if (pts.length < 3) return pts;
-    function seg(p, a, b) {
-      var vx = b.x - a.x, vy = b.y - a.y, L = vx * vx + vy * vy;
-      if (!L) return Math.hypot(p.x - a.x, p.y - a.y);
-      var t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy) / L));
-      return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t));
-    }
-    function rec(s, e) {
-      var maxD = 0, idx = -1;
-      for (var i = s + 1; i < e; i++) {
-        var dd = seg(pts[i], pts[s], pts[e]);
-        if (dd > maxD) { maxD = dd; idx = i; }
-      }
-      if (maxD > eps && idx > 0) return rec(s, idx).concat(rec(idx, e).slice(1));
-      return [pts[s], pts[e]];
-    }
-    return rec(0, pts.length - 1);
-  }
-
-  /* ---------- selecionar a casa por retângulo ----------
-     Você marca os dois cantos de um retângulo em volta da casa. Dentro dele o
-     telhado é a cor dominante — agrupamos os pixels em 3 grupos de cor e
-     ficamos com o grupo que manda no centro. Isso resolve telhado com um lado
-     no sol e outro na sombra, que o crescimento por cor não dava conta. */
-
-  // k-médias simples em RGB
-  function kmeans(samples, k, iters) {
-    var cent = [];
-    for (var i = 0; i < k; i++) {
-      var s = samples[Math.floor(i * (samples.length - 1) / Math.max(1, k - 1))];
-      cent.push([s[0], s[1], s[2]]);
-    }
-    for (var it = 0; it < iters; it++) {
-      var sum = [], cnt = [];
-      for (var c = 0; c < k; c++) { sum.push([0, 0, 0]); cnt.push(0); }
-      for (var j = 0; j < samples.length; j++) {
-        var p = samples[j], bi = 0, bd = 1e12;
-        for (var c2 = 0; c2 < k; c2++) {
-          var dr = p[0] - cent[c2][0], dg = p[1] - cent[c2][1], db = p[2] - cent[c2][2];
-          var d2 = dr * dr + dg * dg + db * db;
-          if (d2 < bd) { bd = d2; bi = c2; }
-        }
-        sum[bi][0] += p[0]; sum[bi][1] += p[1]; sum[bi][2] += p[2]; cnt[bi]++;
-      }
-      for (var c3 = 0; c3 < k; c3++) {
-        if (!cnt[c3]) continue;
-        cent[c3] = [sum[c3][0] / cnt[c3], sum[c3][1] / cnt[c3], sum[c3][2] / cnt[c3]];
-      }
-    }
-    return cent;
-  }
-
-  function nearest(cent, r, g, b) {
-    var bi = 0, bd = 1e12;
-    for (var i = 0; i < cent.length; i++) {
-      var dr = r - cent[i][0], dg = g - cent[i][1], db = b - cent[i][2];
-      var d2 = dr * dr + dg * dg + db * db;
-      if (d2 < bd) { bd = d2; bi = i; }
-    }
-    return bi;
-  }
-
-  // mantém só a mancha ligada ao centro
-  function keepCentral(mask, W, H, cx, cy) {
-    var out = new Uint8Array(W * H);
-    if (!mask[cy * W + cx]) {                      // centro fora: procura perto
-      var found = false;
-      for (var r = 1; r < Math.min(W, H) / 3 && !found; r += 2) {
-        for (var a = 0; a < 16 && !found; a++) {
-          var x = Math.round(cx + r * Math.cos(a * Math.PI / 8));
-          var y = Math.round(cy + r * Math.sin(a * Math.PI / 8));
-          if (x > 0 && y > 0 && x < W && y < H && mask[y * W + x]) { cx = x; cy = y; found = true; }
-        }
-      }
-      if (!found) return { mask: out, area: 0 };
-    }
-    var st = [cy * W + cx], n = 0;
-    out[cy * W + cx] = 1;
-    while (st.length) {
-      var o = st.pop(); n++;
-      var y0 = (o / W) | 0, x0 = o % W;
-      for (var k = 0; k < 4; k++) {
-        var nx = x0 + (k === 0 ? 1 : k === 1 ? -1 : 0);
-        var ny = y0 + (k === 2 ? 1 : k === 3 ? -1 : 0);
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
-        var oo = ny * W + nx;
-        if (out[oo] || !mask[oo]) continue;
-        out[oo] = 1; st.push(oo);
-      }
-    }
-    return { mask: out, area: n };
-  }
-
-  // extrai o telhado dentro do retângulo
-  function roofFromRect(img, x0, y0, x1, y1) {
-    var W = img.width, d = img.data;
-    var rw = x1 - x0, rh = y1 - y0;
-    if (rw < 12 || rh < 12) return null;
-
-    // amostra para o agrupamento
-    var samples = [], step = Math.max(1, Math.round(Math.sqrt(rw * rh / 3000)));
-    for (var y = y0; y < y1; y += step) {
-      for (var x = x0; x < x1; x += step) {
-        var o = (y * W + x) * 4;
-        samples.push([d[o], d[o + 1], d[o + 2]]);
-      }
-    }
-    if (samples.length < 12) return null;
-    samples.sort(function (a, b) { return (a[0] + a[1] + a[2]) - (b[0] + b[1] + b[2]); });
-    var K = 5;
-    var cent = kmeans(samples, K, 10);
-
-    /* Quais grupos são telhado: todos os que aparecem de verdade no miolo do
-       retângulo. Telhado com um lado no sol e outro na sombra cai em dois grupos
-       diferentes — e os dois estão no meio. Grama e rua ficam nas bordas, então
-       não entram. */
-    var mx0 = Math.round(x0 + rw * 0.28), mx1 = Math.round(x0 + rw * 0.72);
-    var my0 = Math.round(y0 + rh * 0.28), my1 = Math.round(y0 + rh * 0.72);
-    var votes = new Array(K).fill(0), totalV = 0;
-    for (var y2 = my0; y2 < my1; y2 += 2) {
-      for (var x2 = mx0; x2 < mx1; x2 += 2) {
-        var o2 = (y2 * W + x2) * 4;
-        votes[nearest(cent, d[o2], d[o2 + 1], d[o2 + 2])]++;
-        totalV++;
-      }
-    }
-    if (!totalV) return null;
-    var isRoof = votes.map(function (v) { return v / totalV >= 0.12; });
-    if (!isRoof.some(Boolean)) isRoof[votes.indexOf(Math.max.apply(null, votes))] = true;
-
-    // máscara: pixels dos grupos de telhado, só dentro do retângulo
-    var m = new Uint8Array(rw * rh);
-    for (var y3 = 0; y3 < rh; y3++) {
-      for (var x3 = 0; x3 < rw; x3++) {
-        var o3 = ((y3 + y0) * W + (x3 + x0)) * 4;
-        if (isRoof[nearest(cent, d[o3], d[o3 + 1], d[o3 + 2])]) m[y3 * rw + x3] = 1;
-      }
-    }
-
-    var obj = { mask: m, w: rw, h: rh };
-    closeMask(obj, 2);
-    var kept = keepCentral(obj.mask, rw, rh, Math.round(rw / 2), Math.round(rh / 2));
-    if (kept.area < rw * rh * 0.06) return null;
-    obj.mask = kept.mask; obj.area = kept.area;
-    return obj;
-  }
-
+  /* ---------- recorte ampliado do satélite ----------
+     Você delimita a casa com dois toques; o app monta um recorte em alta
+     resolução e abre uma tela de trabalho grande, com zoom de dois dedos.
+     Cada toque continua virando latitude/longitude por baixo — a metragem
+     permanece geográfica, exata, sem depender de régua. */
   var pickMode = false, rectA = null, rectLayer = null;
+  var mapCands = [], candLayer = null;
+
+  function drawCands() {}
+  function clearCands() {
+    mapCands = [];
+    if (candLayer) candLayer.clearLayers();
+    if (rectLayer && map) { map.removeLayer(rectLayer); rectLayer = null; }
+    pickMode = false; rectA = null;
+  }
 
   function startPickHouse() {
     if (!map) return;
@@ -1010,113 +779,420 @@
       toast('Agora o canto oposto.');
       return;
     }
-    var b1 = L.latLngBounds(rectA, latlng);
+    var bb = L.latLngBounds(rectA, latlng);
     if (rectLayer) map.removeLayer(rectLayer);
-    rectLayer = L.rectangle(b1, { color: '#2BE0C0', weight: 2, dashArray: '8 6', fill: false }).addTo(map);
-    pickMode = false;
-    rectA = null;
-    extractRoof(b1);
+    rectLayer = null;
+    pickMode = false; rectA = null;
+    openCrop(bb);
   }
 
-  function extractRoof(bounds) {
-    toast('Lendo o telhado…');
-    mapViewCanvas().then(function (v) {
+  /* ---------- tela de recorte: desenhar sobre o satélite ampliado ---------- */
+  var cp = {
+    img: null, w: 0, h: 0,
+    view: { z: 1, ox: 0, oy: 0 },
+    fit: { x: 0, y: 0, s: 1 },
+    toLatLng: null, toPixel: null,
+    ortho: true, boost: false, drag: null
+  };
+
+  function cropCanvas() { return document.getElementById('crop-canvas'); }
+
+  function openCrop(bounds) {
+    toast('Preparando o recorte…');
+    cropTiles(bounds).then(function (v) {
       if (!v) { toast('Aproxime o mapa e tente de novo.'); return; }
-      var img = grabPixels(v.canvas);
-      if (!img) { toast('Não consegui ler esta camada de imagem.'); return; }
-
-      var p1 = v.toPixel(bounds.getNorth(), bounds.getWest());
-      var p2 = v.toPixel(bounds.getSouth(), bounds.getEast());
-      var x0 = Math.max(1, Math.round(Math.min(p1.x, p2.x)));
-      var x1 = Math.min(img.width - 1, Math.round(Math.max(p1.x, p2.x)));
-      var y0 = Math.max(1, Math.round(Math.min(p1.y, p2.y)));
-      var y1 = Math.min(img.height - 1, Math.round(Math.max(p1.y, p2.y)));
-
-      var roof = roofFromRect(img, x0, y0, x1, y1);
-      if (!roof) {
-        toast('Não separei o telhado aí. Refaça o retângulo mais justo na casa.');
-        return;
-      }
-
-      var contour = traceContour(roof);
-      if (contour.length < 8) { toast('Contorno fraco. Tente um retângulo mais justo.'); return; }
-      var poly = simplify(contour, Math.max(3, Math.round(Math.sqrt(roof.area) / 20)));
-
-      mapCands = [];
-      var ll = poly.map(function (p) { return v.toLatLng(p.x + x0, p.y + y0); });
-      for (var i = 1; i < ll.length; i++) {
-        if (Calc.haversineFt(ll[i - 1], ll[i]) < 6) continue;
-        mapCands.push([ll[i - 1], ll[i]]);
-      }
-      if (mapCands.length < 2) { toast('Contorno fraco aqui. Refaça o retângulo.'); return; }
-      drawCands();
-      toast(mapCands.length + ' lados do telhado. Toque só nos que levam calha.');
-    }).catch(function () { toast('Não consegui analisar agora.'); });
+      cp.img = v.canvas; cp.w = v.canvas.width; cp.h = v.canvas.height;
+      cp.toLatLng = v.toLatLng; cp.toPixel = v.toPixel;
+      cp.view = { z: 1, ox: 0, oy: 0 };
+      go('crop');
+      setTimeout(function () { computeCropFit(); drawCrop(); }, 80);
+      toast('Toque nos cantos do beiral. Cada trecho mostra a medida.');
+    }).catch(function () { toast('Não consegui montar o recorte.'); });
   }
 
-  function detectRoofImage() {
-    if (!map) return;
-    toast('Analisando a imagem do telhado…');
-    mapViewCanvas().then(function (v) {
-      if (!v) { toast('Aproxime um pouco o mapa e tente de novo.'); return; }
-      var edge = computeEdges(v.canvas, 1100);
-      if (!edge) { toast('Não consegui ler a imagem desta camada.'); return; }
-      var segs = houghSegments(edge, { relax: 1, onlyH: false, max: 30 });
-      if (segs.length < 4) segs = houghSegments(edge, { relax: 1.8, onlyH: false, max: 30 });
-      if (!segs.length) { detectRoof(); return; }         // sem retas: cai no contorno do OSM
+  // monta o recorte no maior zoom possível, com folga em volta
+  function cropTiles(b) {
+    var def = LAYERS[layerIdx];
+    if (def.type !== 'xyz') def = LAYERS[0];
+    var padLat = (b.getNorth() - b.getSouth()) * 0.12;
+    var padLng = (b.getEast() - b.getWest()) * 0.12;
+    var N = b.getNorth() + padLat, S = b.getSouth() - padLat;
+    var Wl = b.getWest() - padLng, E = b.getEast() + padLng;
 
-      mapCands = segs.map(function (s2) {
-        return [v.toLatLng(s2.a.x, s2.a.y), v.toLatLng(s2.b.x, s2.b.y)];
-      }).filter(function (ll) {
-        return Calc.haversineFt(ll[0], ll[1]) > 8;        // trecho curto não é calha
-      }).slice(0, 24);
+    var z = 22, WS, w, h;
+    for (; z > 15; z--) {
+      WS = 256 * Math.pow(2, z);
+      w = lngToPx(E, WS) - lngToPx(Wl, WS);
+      h = latToPx(S, WS) - latToPx(N, WS);
+      if (w <= 2200 && h <= 2200) break;
+    }
+    WS = 256 * Math.pow(2, z);
+    var x0 = lngToPx(Wl, WS), y0 = latToPx(N, WS);
+    var tx0 = Math.floor(x0 / 256), tx1 = Math.floor(lngToPx(E, WS) / 256);
+    var ty0 = Math.floor(y0 / 256), ty1 = Math.floor(latToPx(S, WS) / 256);
+    if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 64) return Promise.resolve(null);
 
-      drawCands();
-      toast(mapCands.length + ' linhas no telhado. Toque só nas águas que levam calha.');
-    }).catch(function () { toast('Não consegui analisar agora.'); });
+    var nz = Math.min(z, def.max);
+    var scale = Math.pow(2, z - nz);
+    var CW = (tx1 - tx0 + 1) * 256, CH = (ty1 - ty0 + 1) * 256;
+    var cv = document.createElement('canvas');
+    cv.width = CW; cv.height = CH;
+    var g = cv.getContext('2d');
+    g.fillStyle = '#22303A'; g.fillRect(0, 0, CW, CH);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+
+    var jobs2 = [];
+    for (var tx = tx0; tx <= tx1; tx++) {
+      for (var ty = ty0; ty <= ty1; ty++) {
+        (function (tx, ty) {
+          var sx = Math.floor(tx / scale), sy = Math.floor(ty / scale);
+          var url = def.url.replace('{z}', nz).replace('{x}', sx).replace('{y}', sy);
+          jobs2.push(loadTile(url).then(function (im) {
+            if (!im) return;
+            var dx = (tx - tx0) * 256, dy = (ty - ty0) * 256;
+            if (scale === 1) { g.drawImage(im, dx, dy, 256, 256); return; }
+            var sub = 256 / scale;
+            g.drawImage(im, (tx % scale) * sub, (ty % scale) * sub, sub, sub, dx, dy, 256, 256);
+          }));
+        })(tx, ty);
+      }
+    }
+    return Promise.all(jobs2).then(function () {
+      var ox = tx0 * 256, oy = ty0 * 256;
+      return {
+        canvas: cv,
+        toLatLng: function (px, py) {
+          var wx = ox + px, wy = oy + py;
+          var lng = wx / WS * 360 - 180;
+          var n = Math.PI - 2 * Math.PI * wy / WS;
+          return { lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng: lng };
+        },
+        toPixel: function (lat, lng) {
+          return { x: lngToPx(lng, WS) - ox, y: latToPx(lat, WS) - oy };
+        }
+      };
+    });
   }
 
-  function drawCands() {
-    if (!candLayer) candLayer = L.layerGroup().addTo(map);
-    candLayer.clearLayers();
-    mapCands.forEach(function (ll, i) {
-      var line = L.polyline([[ll[0].lat, ll[0].lng], [ll[1].lat, ll[1].lng]], {
-        color: '#2BE0C0', weight: 5, opacity: .95, dashArray: '10 7', interactive: true
-      }).addTo(candLayer);
-      line.on('click', function (ev) {
-        L.DomEvent.stop(ev);
-        var last = job.runs[job.runs.length - 1];
-        if (last && last.points.length) job.runs.push({ points: [], level: 1 });
-        if (!job.runs.length) job.runs.push({ points: [], level: 1 });
-        job.runs[job.runs.length - 1].points = [
-          { lat: ll[0].lat, lng: ll[0].lng }, { lat: ll[1].lat, lng: ll[1].lng }
-        ];
-        job.runs.push({ points: [], level: 1 });
-        mapCands.splice(i, 1);
-        drawCands(); renderDraw();
-        toast('Linha aceita.');
+  function computeCropFit() {
+    var st = document.getElementById('crop-stage');
+    if (!st || !cp.img) return cp.fit;
+    var W = st.clientWidth, H = st.clientHeight;
+    var base = Math.min(W / cp.w, H / cp.h);
+    cp.fit = {
+      x: (W - cp.w * base) / 2 + cp.view.ox,
+      y: (H - cp.h * base) / 2 + cp.view.oy,
+      s: base * cp.view.z, base: base
+    };
+    return cp.fit;
+  }
+
+  function clampCrop() {
+    var st = document.getElementById('crop-stage');
+    if (!st || !cp.img) return;
+    var W = st.clientWidth, H = st.clientHeight, lim = 60;
+    var base = Math.min(W / cp.w, H / cp.h);
+    var iw = cp.w * base * cp.view.z, ih = cp.h * base * cp.view.z;
+    var cx = (W - cp.w * base) / 2, cy = (H - cp.h * base) / 2;
+    var maxOx = lim - cx, minOx = W - iw - lim - cx;
+    var maxOy = lim - cy, minOy = H - ih - lim - cy;
+    cp.view.ox = (minOx > maxOx) ? (minOx + maxOx) / 2 : Math.max(minOx, Math.min(maxOx, cp.view.ox));
+    cp.view.oy = (minOy > maxOy) ? (minOy + maxOy) / 2 : Math.max(minOy, Math.min(maxOy, cp.view.oy));
+  }
+
+  // trava o ponto em 90° em relação ao trecho anterior
+  function orthoSnap(run, p) {
+    if (!cp.ortho || run.points.length < 1) return p;
+    var prev = cp.toPixel(run.points[run.points.length - 1].lat, run.points[run.points.length - 1].lng);
+    var vx = p.x - prev.x, vy = p.y - prev.y;
+    if (Math.hypot(vx, vy) < 4) return p;
+
+    if (run.points.length === 1) {                 // primeiro trecho: horizontal ou vertical
+      return Math.abs(vx) > Math.abs(vy)
+        ? { x: p.x, y: prev.y } : { x: prev.x, y: p.y };
+    }
+    var a = cp.toPixel(run.points[run.points.length - 2].lat, run.points[run.points.length - 2].lng);
+    var ux = prev.x - a.x, uy = prev.y - a.y;
+    var L = Math.hypot(ux, uy);
+    if (L < 1) return p;
+    ux /= L; uy /= L;
+    var along = vx * ux + vy * uy;                  // componente na mesma direção
+    var perpX = -uy, perpY = ux;
+    var perp = vx * perpX + vy * perpY;             // componente perpendicular
+    // fica com a projeção dominante: continua reto ou vira exatamente 90°
+    return Math.abs(along) >= Math.abs(perp)
+      ? { x: prev.x + ux * along, y: prev.y + uy * along }
+      : { x: prev.x + perpX * perp, y: prev.y + perpY * perp };
+  }
+
+  function drawCrop() {
+    var c = cropCanvas();
+    if (!c || !cp.img) return;
+    var st = document.getElementById('crop-stage');
+    var W = st.clientWidth, H = st.clientHeight;
+    var dpr = window.devicePixelRatio || 1;
+    c.width = W * dpr; c.height = H * dpr;
+    var g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+
+    var f = computeCropFit();
+    g.filter = cp.boost ? 'contrast(1.32) saturate(1.15) brightness(1.06)' : 'none';
+    g.imageSmoothingEnabled = cp.view.z < 3;
+    g.drawImage(cp.img, f.x, f.y, cp.w * f.s, cp.h * f.s);
+    g.filter = 'none';
+
+    function P(ll) {
+      var q = cp.toPixel(ll.lat, ll.lng);
+      return [f.x + q.x * f.s, f.y + q.y * f.s];
+    }
+
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    job.runs.forEach(function (run) {
+      var pts = run.points;
+      if (pts.length > 1) {
+        g.strokeStyle = 'rgba(14,19,23,.5)'; g.lineWidth = 10;
+        g.beginPath(); pts.forEach(function (p, i) { var a = P(p); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); }); g.stroke();
+        g.strokeStyle = levelColor(run.level); g.lineWidth = 5;
+        g.beginPath(); pts.forEach(function (p, i) { var a = P(p); i ? g.lineTo(a[0], a[1]) : g.moveTo(a[0], a[1]); }); g.stroke();
+
+        g.font = '600 14px "IBM Plex Mono", monospace';
+        for (var i = 1; i < pts.length; i++) {
+          var len = Calc.haversineFt(pts[i - 1], pts[i]) * settings.calibration;
+          if (len < 4) continue;
+          var A = P(pts[i - 1]), B = P(pts[i]);
+          var mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+          var txt = Math.round(len) + ' ft';
+          var w = g.measureText(txt).width + 12;
+          g.fillStyle = 'rgba(14,19,23,.9)'; g.fillRect(mx - w / 2, my - 11, w, 22);
+          g.fillStyle = levelColor(run.level); g.fillText(txt, mx - w / 2 + 6, my + 5);
+        }
+      }
+      pts.forEach(function (p) {
+        var a = P(p);
+        g.fillStyle = levelColor(run.level); g.beginPath(); g.arc(a[0], a[1], 7, 0, 6.284); g.fill();
+        g.strokeStyle = '#0E1317'; g.lineWidth = 2.5; g.stroke();
       });
     });
+
+    var m = Calc.measure(job.runs, settings.calibration, job.manual);
+    $('#crop-ft').textContent = Math.round(m.feet);
+    $('#crop-total').textContent = Math.round(m.feet);
+    $('#crop-zoom').textContent = cp.view.z.toFixed(1) + '×';
+    $('#crop-info').textContent = m.runs + ' linha(s) · ' + m.corners + ' cantos';
+    updateTape();
   }
 
-  $('#btn-accept-all').addEventListener('click', function () {
-    if (!mapCands.length) { toast('Nenhum lado detectado ainda.'); return; }
-    var n = mapCands.length;
-    mapCands.forEach(function (ll) {
-      job.runs.push({ points: [
-        { lat: ll[0].lat, lng: ll[0].lng }, { lat: ll[1].lat, lng: ll[1].lng }
-      ], level: 1 });
+  /* --- gestos e botões da tela de recorte --- */
+  (function () {
+    var cv = cropCanvas();
+    if (!cv) return;
+    var pts = {}, moved = false, panFrom = null, pendingDrag = null;
+    var startD = 0, startZ = 1, startMid = null, startOx = 0, startOy = 0;
+
+    function toImg(cx, cy) {
+      var r = cv.getBoundingClientRect(), f = computeCropFit();
+      return { x: (cx - r.left - f.x) / f.s, y: (cy - r.top - f.y) / f.s };
+    }
+
+    function hit(p) {
+      var f = computeCropFit(), tol = 18 / f.s, best = null, bd = tol;
+      job.runs.forEach(function (run, ri) {
+        run.points.forEach(function (ll, pi) {
+          var q = cp.toPixel(ll.lat, ll.lng);
+          var d = Math.hypot(p.x - q.x, p.y - q.y);
+          if (d < bd) { bd = d; best = { ri: ri, pi: pi }; }
+        });
+      });
+      return best;
+    }
+
+    function ids() { return Object.keys(pts); }
+
+    cv.addEventListener('pointerdown', function (e) {
+      if (!cp.img) return;
+      cv.setPointerCapture(e.pointerId);
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var n = ids().length;
+      if (n === 1) {
+        moved = false;
+        pendingDrag = hit(toImg(e.clientX, e.clientY));
+        cp.drag = null;
+        panFrom = { x: e.clientX, y: e.clientY, ox: cp.view.ox, oy: cp.view.oy };
+      } else if (n === 2) {
+        cp.drag = null; pendingDrag = null; moved = true;
+        var k = ids();
+        startD = Math.hypot(pts[k[0]].x - pts[k[1]].x, pts[k[0]].y - pts[k[1]].y);
+        startZ = cp.view.z; startOx = cp.view.ox; startOy = cp.view.oy;
+        var r = cv.getBoundingClientRect();
+        startMid = { x: (pts[k[0]].x + pts[k[1]].x) / 2 - r.left,
+                     y: (pts[k[0]].y + pts[k[1]].y) / 2 - r.top };
+      }
     });
+
+    cv.addEventListener('pointermove', function (e) {
+      if (!cp.img || !pts[e.pointerId]) return;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var k = ids();
+      if (k.length >= 2) {
+        var d = Math.hypot(pts[k[0]].x - pts[k[1]].x, pts[k[0]].y - pts[k[1]].y);
+        if (startD > 0) {
+          var z = Math.max(1, Math.min(14, startZ * (d / startD)));
+          var fr = z / startZ;
+          cp.view.z = z;
+          cp.view.ox = startMid.x - (startMid.x - startOx) * fr;
+          cp.view.oy = startMid.y - (startMid.y - startOy) * fr;
+          clampCrop(); drawCrop();
+        }
+        return;
+      }
+      var dx = e.clientX - panFrom.x, dy = e.clientY - panFrom.y;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        if (!moved && pendingDrag) cp.drag = pendingDrag;
+        moved = true;
+      }
+      if (cp.drag) {
+        var p = toImg(e.clientX, e.clientY);
+        var ll = cp.toLatLng(p.x, p.y);
+        job.runs[cp.drag.ri].points[cp.drag.pi] = { lat: ll.lat, lng: ll.lng };
+        showCropLoupe(p);
+        drawCrop();
+      } else if (moved) {
+        cp.view.ox = panFrom.ox + dx; cp.view.oy = panFrom.oy + dy;
+        clampCrop(); drawCrop();
+      }
+    });
+
+    function end(e) {
+      if (!pts[e.pointerId]) return;
+      var wasMoved = moved;
+      delete pts[e.pointerId];
+      if (ids().length === 0) {
+        cp.drag = null; pendingDrag = null;
+        hideCropLoupe();
+        if (!wasMoved && cp.img) addCropPoint(e.clientX, e.clientY);
+        renderDraw();
+      }
+      if (ids().length === 1) {
+        var k = ids()[0];
+        panFrom = { x: pts[k].x, y: pts[k].y, ox: cp.view.ox, oy: cp.view.oy };
+        moved = true;
+      }
+    }
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+
+    function addCropPoint(cx, cy) {
+      var p = toImg(cx, cy);
+      if (p.x < 0 || p.y < 0 || p.x > cp.w || p.y > cp.h) return;
+      if (!job.runs.length) job.runs.push({ points: [], level: 1 });
+      var run = job.runs[job.runs.length - 1];
+      p = orthoSnap(run, p);
+      var ll = cp.toLatLng(p.x, p.y);
+      run.points.push({ lat: ll.lat, lng: ll.lng });
+      drawCrop();
+    }
+
+    cv.addEventListener('wheel', function (e) {
+      if (!cp.img) return;
+      e.preventDefault();
+      var r = cv.getBoundingClientRect();
+      var mx = e.clientX - r.left, my = e.clientY - r.top;
+      var z = Math.max(1, Math.min(14, cp.view.z * (e.deltaY < 0 ? 1.15 : 0.87)));
+      var fr = z / cp.view.z;
+      cp.view.z = z;
+      cp.view.ox = mx - (mx - cp.view.ox) * fr;
+      cp.view.oy = my - (my - cp.view.oy) * fr;
+      clampCrop(); drawCrop();
+    }, { passive: false });
+  })();
+
+  function showCropLoupe(p) {
+    var el = document.getElementById('crop-loupe');
+    if (!el || !cp.img) return;
+    el.classList.add('is-on');
+    var g = el.getContext('2d'), S = 336, Z = 3;
+    var scale = cp.fit.s * Z * 2, half = S / (2 * scale);
+    g.clearRect(0, 0, S, S);
+    g.fillStyle = '#22303A'; g.fillRect(0, 0, S, S);
+    g.drawImage(cp.img, p.x - half, p.y - half, half * 2, half * 2, 0, 0, S, S);
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(S / 2 - 26, S / 2); g.lineTo(S / 2 + 26, S / 2);
+    g.moveTo(S / 2, S / 2 - 26); g.lineTo(S / 2, S / 2 + 26);
+    g.stroke();
+  }
+  function hideCropLoupe() {
+    var el = document.getElementById('crop-loupe');
+    if (el) el.classList.remove('is-on');
+  }
+
+  function cropZoom(mult) {
+    if (!cp.img) return;
+    var st = document.getElementById('crop-stage');
+    var mx = st.clientWidth / 2, my = st.clientHeight / 2;
+    var z = Math.max(1, Math.min(14, cp.view.z * mult));
+    var f = z / cp.view.z;
+    cp.view.z = z;
+    cp.view.ox = mx - (mx - cp.view.ox) * f;
+    cp.view.oy = my - (my - cp.view.oy) * f;
+    clampCrop(); drawCrop();
+  }
+
+  $('#crop-zin').addEventListener('click', function () { cropZoom(1.6); });
+  $('#crop-zout').addEventListener('click', function () { cropZoom(1 / 1.6); });
+  $('#crop-zfit').addEventListener('click', function () {
+    cp.view = { z: 1, ox: 0, oy: 0 }; drawCrop();
+  });
+  $('#crop-ortho').addEventListener('click', function () {
+    cp.ortho = !cp.ortho;
+    $('#crop-ortho').classList.toggle('is-on', cp.ortho);
+    toast(cp.ortho ? 'Ângulo travado em 90°.' : 'Ângulo livre.');
+  });
+  $('#crop-boost').addEventListener('click', function () {
+    cp.boost = !cp.boost;
+    $('#crop-boost').classList.toggle('is-on', cp.boost);
+    drawCrop();
+  });
+  $('#crop-close').addEventListener('click', function () {
+    var run = job.runs[job.runs.length - 1];
+    if (!run || run.points.length < 3) { toast('Marque pelo menos 3 cantos antes de fechar.'); return; }
+    var a = run.points[0], b = run.points[run.points.length - 1];
+    if (Calc.haversineFt(a, b) < 2) { toast('Esta volta já está fechada.'); return; }
+    run.points.push({ lat: a.lat, lng: a.lng });
     job.runs.push({ points: [], level: 1 });
-    clearCands(); renderDraw();
-    toast(n + ' lados aceitos. Apague no modo Ajustar os que não levam calha.');
+    drawCrop(); renderDraw();
+    toast('Volta fechada.');
+  });
+  $('#crop-undo').addEventListener('click', function () {
+    if (!job.runs.length) return;
+    var i = job.runs.length - 1;
+    job.runs[i].points.pop();
+    if (!job.runs[i].points.length && job.runs.length > 1) job.runs.pop();
+    drawCrop(); renderDraw();
+  });
+  $('#crop-newline').addEventListener('click', function () {
+    var last = job.runs[job.runs.length - 1];
+    if (last && !last.points.length) { toast('A linha atual está vazia.'); return; }
+    job.runs.push({ points: [], level: 1 });
+    toast('Linha nova.');
+  });
+  $('#crop-clear').addEventListener('click', function () {
+    job.runs = []; drawCrop(); renderDraw();
+  });
+  $('#crop-done').addEventListener('click', function () {
+    go('map');
+    setTimeout(function () { if (map) { map.invalidateSize(); renderDraw(); } }, 80);
   });
 
-  function clearCands() {
-    mapCands = [];
-    if (candLayer) candLayer.clearLayers();
-    if (rectLayer) { map.removeLayer(rectLayer); rectLayer = null; }
-    pickMode = false; rectA = null;
+  if (window.ResizeObserver) {
+    var cropRo = new ResizeObserver(function () {
+      if (cp.img && document.getElementById('screen-crop').classList.contains('is-active')) {
+        computeCropFit(); clampCrop(); drawCrop();
+      }
+    });
+    cropRo.observe(document.getElementById('crop-stage'));
   }
 
   /* ---------- botões do mapa ---------- */
