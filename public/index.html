@@ -23,7 +23,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.28</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.29</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -137,8 +137,7 @@
         <button class="mode-btn" data-mapmode="edit">Ajustar</button>
       </div>
       <div class="dock-scroll" id="tools-draw">
-        <button class="rail-btn rail-go" id="btn-detect">Selecionar casa</button>
-        <button class="rail-btn" id="btn-accept-all">Aceitar lados</button>
+        <button class="rail-btn rail-go" id="btn-detect">Ampliar casa</button>
         <button class="rail-btn" id="btn-parts">Medições <span class="parts-badge" id="parts-count">0</span></button>
         <button class="rail-btn" id="btn-undo">Desfazer</button>
         <button class="rail-btn" id="btn-newline">Nova linha</button>
@@ -174,6 +173,51 @@
       </div>
     </div>
     <button class="btn btn-primary btn-block" id="btn-to-materials">Calcular materiais</button>
+  </div>
+</section>
+
+<!-- ============ RECORTE DO SATÉLITE ============ -->
+<section class="screen" id="screen-crop">
+  <header class="topbar">
+    <button class="btn-icon" data-back="map" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <div><p class="eyebrow">Satélite ampliado</p><h2 class="topbar-title">Traçar calhas</h2></div>
+    <span></span>
+  </header>
+
+  <div class="photo-stage" id="crop-stage">
+    <canvas id="crop-canvas"></canvas>
+    <canvas id="crop-loupe" class="ph-loupe" width="336" height="336"></canvas>
+    <div class="crop-top">
+      <span class="crop-read"><b id="crop-ft">0</b> ft</span>
+      <span class="crop-hint" id="crop-hint">toque nos cantos do beiral</span>
+    </div>
+  </div>
+
+  <div class="photo-bar" id="crop-bar">
+    <div class="zoom-pad">
+      <button id="crop-zout" aria-label="Afastar">−</button>
+      <span id="crop-zoom">1.0×</span>
+      <button id="crop-zin" aria-label="Aproximar">+</button>
+      <button id="crop-zfit" class="zfit">Tela cheia</button>
+    </div>
+
+    <div class="tools-pad">
+      <button id="crop-ortho" class="zfit is-on">Ângulo 90°</button>
+      <button id="crop-close" class="zfit">Fechar volta</button>
+      <button id="crop-boost" class="zfit">Realçar</button>
+      <button id="crop-undo" class="zfit">Desfazer</button>
+      <button id="crop-newline" class="zfit">Nova linha</button>
+    </div>
+
+    <div class="photo-read">
+      <div><b id="crop-total">0</b><small>LINEAR FEET</small></div>
+      <div class="scale" id="crop-info">medido no satélite</div>
+    </div>
+
+    <div class="photo-acts">
+      <button class="btn btn-ghost" id="crop-clear">Limpar</button>
+      <button class="btn btn-primary" id="crop-done">Concluir</button>
+    </div>
   </div>
 </section>
 
@@ -483,7 +527,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.28</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.29</b></p>
   </div>
 </section>
 
