@@ -1,1 +1,8 @@
-
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "dev.workers.rodrigo_costaalves.rainline_app.twa",
+    "sha256_cert_fingerprints": ["4F:13:74:59:AB:D8:07:7D:3C:24:B5:E6:41:7B:50:DA:4C:38:5A:76:FC:40:0E:1F:60:A6:A8:94:1B:BB:8D:1C"]
+  }
+}]
