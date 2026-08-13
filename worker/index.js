@@ -242,6 +242,94 @@ async function getPhoto(env, key) {
   });
 }
 
+/* ---------- assinatura digital ---------- */
+
+// gera (ou devolve) o link público de assinatura
+async function shareLink(req, env, me, jobId) {
+  const row = await env.DB.prepare('SELECT user_id, share_token FROM jobs WHERE id = ?1')
+    .bind(jobId).first();
+  if (!row) return json({ error: 'not found' }, 404);
+  if (row.user_id !== me.id && me.role !== 'admin') return json({ error: 'forbidden' }, 403);
+
+  let token = row.share_token;
+  if (!token) {
+    token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+    await env.DB.prepare('UPDATE jobs SET share_token = ?1 WHERE id = ?2').bind(token, jobId).run();
+  }
+  return json({ token: token, url: new URL(req.url).origin + '/sign.html?t=' + token });
+}
+
+// o cliente abre o link: devolve só o necessário para exibir e assinar
+async function publicJob(env, token) {
+  const row = await env.DB.prepare(
+    'SELECT id, data, total, status FROM jobs WHERE share_token = ?1 AND deleted = 0'
+  ).bind(token).first();
+  if (!row) return json({ error: 'not found' }, 404);
+
+  const sig = await env.DB.prepare(
+    'SELECT signer_name, signed_at FROM signatures WHERE job_id = ?1'
+  ).bind(row.id).first();
+
+  let d = {};
+  try { d = JSON.parse(row.data); } catch (e) {}
+  return json({
+    id: row.id,
+    status: row.status,
+    client: d.client || {},
+    feet: d.feet || 0,
+    size: d.size || 5,
+    total: row.total || 0,
+    lines: d.publicLines || [],
+    company: d.company || {},
+    signed: sig ? { name: sig.signer_name, at: sig.signed_at } : null
+  });
+}
+
+async function signJob(req, env, token) {
+  const body = await req.json();
+  const name = String(body.name || '').trim();
+  const sig = String(body.signature || '');
+  if (name.length < 3) return json({ error: 'name' }, 400);
+  if (!sig.startsWith('data:image/png;base64,') || sig.length > 600000) {
+    return json({ error: 'signature' }, 400);
+  }
+
+  const row = await env.DB.prepare(
+    'SELECT id, total, data FROM jobs WHERE share_token = ?1 AND deleted = 0'
+  ).bind(token).first();
+  if (!row) return json({ error: 'not found' }, 404);
+
+  const already = await env.DB.prepare('SELECT job_id FROM signatures WHERE job_id = ?1')
+    .bind(row.id).first();
+  if (already) return json({ error: 'already signed' }, 409);
+
+  const now = Date.now();
+  await env.DB.prepare(
+    `INSERT INTO signatures (job_id, signer_name, signature, signed_at, ip, user_agent, total, snapshot)
+     VALUES (?1,?2,?3,?4,?5,?6,?7,?8)`
+  ).bind(
+    row.id, name, sig, now,
+    req.headers.get('cf-connecting-ip') || '',
+    (req.headers.get('user-agent') || '').slice(0, 300),
+    row.total || 0, row.data
+  ).run();
+
+  await env.DB.prepare("UPDATE jobs SET status = 'accepted', updated_at = ?2 WHERE id = ?1")
+    .bind(row.id, now).run();
+
+  return json({ ok: true, at: now });
+}
+
+async function getSignature(env, me, jobId) {
+  const row = await env.DB.prepare('SELECT user_id FROM jobs WHERE id = ?1').bind(jobId).first();
+  if (!row) return json({ error: 'not found' }, 404);
+  if (row.user_id !== me.id && me.role !== 'admin') return json({ error: 'forbidden' }, 403);
+  const sig = await env.DB.prepare(
+    'SELECT signer_name, signature, signed_at, ip FROM signatures WHERE job_id = ?1'
+  ).bind(jobId).first();
+  return json({ signature: sig || null });
+}
+
 /* ---------- roteador ---------- */
 
 export default {
@@ -256,6 +344,12 @@ export default {
 
     try {
       if (path === '/api/health') return json({ ok: true, time: Date.now() });
+
+      // rotas públicas do cliente (sem login)
+      const pm = path.match(/^\/api\/public\/([\w-]+)$/);
+      if (pm && req.method === 'GET') return await publicJob(env, pm[1]);
+      const sm = path.match(/^\/api\/public\/([\w-]+)\/sign$/);
+      if (sm && req.method === 'POST') return await signJob(req, env, sm[1]);
       if (path === '/api/login' && req.method === 'POST') return await login(req, env);
       if (path === '/api/logout' && req.method === 'POST') return await logout(req, env);
 
@@ -272,6 +366,11 @@ export default {
       }
 
       if (path === '/api/jobs' && req.method === 'GET') return await listJobs(req, env, me);
+
+      const lm = path.match(/^\/api\/jobs\/([\w-]+)\/share$/);
+      if (lm && req.method === 'POST') return await shareLink(req, env, me, lm[1]);
+      const gm = path.match(/^\/api\/jobs\/([\w-]+)\/signature$/);
+      if (gm && req.method === 'GET') return await getSignature(env, me, gm[1]);
 
       const jm = path.match(/^\/api\/jobs\/([\w-]+)$/);
       if (jm) {
