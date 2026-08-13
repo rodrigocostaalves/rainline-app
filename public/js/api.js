@@ -70,7 +70,14 @@
       });
     },
 
-    photoUrl: function (key) { return '/api/photos/' + key; }
+    photoUrl: function (key) { return '/api/photos/' + key; },
+
+    shareLink: function (jobId) {
+      return req('/api/jobs/' + encodeURIComponent(jobId) + '/share', { method: 'POST' });
+    },
+    signature: function (jobId) {
+      return req('/api/jobs/' + encodeURIComponent(jobId) + '/signature');
+    }
   };
 
   function dataUrlToBlob(u) {

@@ -2683,6 +2683,9 @@
     var d = currentList();
     setStatus(job.status || 'draft');
     $('#btn-delete-job').style.display = job.savedAt ? '' : 'none';
+    $('#btn-sign').style.display = job.savedAt ? '' : 'none';
+    renderSignCard();
+    checkSignature(0);
     $('#quote-discount').value = job.discount || 0;
     $('#quote-tax').value = job.taxPct || 0;
     var cfg = Object.assign({}, d.cfg, {
@@ -3238,6 +3241,96 @@
     a2.href = URL.createObjectURL(blob); a2.download = name; a2.click();
     shareText(txt);
     return Promise.resolve();
+  }
+
+  /* ---------- assinatura digital ---------- */
+  $('#btn-sign').addEventListener('click', function () {
+    if (!job.savedAt) { toast('Salve o orçamento antes de enviar para assinatura.'); return; }
+    if (cloud.on === false || !cloud.user) {
+      toast('Precisa estar conectado à nuvem para gerar o link.');
+      return;
+    }
+    toast('Gerando o link…');
+    // grava a lista que o cliente vai ver (sem margem nem mão de obra soltas)
+    var d = currentList();
+    var cfg = Object.assign({}, d.cfg, {
+      discount: job.discount, taxPct: job.taxPct, marginMode: job.marginMode || 'pct'
+    });
+    var p = Calc.price(d.list, cfg);
+    var shown = p.lines.filter(function (x) { return !/^Margem/.test(x.name); });
+    var hidden = p.lines.reduce(function (a, x) { return a + (/^Margem/.test(x.name) ? x.total : 0); }, 0)
+                 + (p.labor || 0);
+    var base = shown.reduce(function (a, x) { return a + x.total; }, 0) || 1;
+    job.publicLines = shown.map(function (x) {
+      return { name: EN[x.key] || x.name, qty: x.qty, unit: x.unit,
+               total: x.total * (1 + hidden / base) };
+    });
+    job.company = {
+      name: settings.company || '', phone: settings.phone || '', email: settings.email || ''
+    };
+    job.total = p.total;
+    job.feet = d.m.feet;
+
+    saveJob(true);
+    pushJob(jobs.filter(function (x) { return x.id === job.id; })[0] || job)
+      .then(function () { return Api.shareLink(job.id); })
+      .then(function (r) {
+        job.signUrl = r.url;
+        renderSignCard();
+        var msg = 'Olá' + (job.client.name ? ' ' + job.client.name.split(' ')[0] : '') +
+          ', segue o orçamento das calhas. É só abrir e assinar pelo celular:\n' + r.url;
+        if (navigator.share) navigator.share({ title: 'Gutter estimate', text: msg }).catch(function () {});
+        else { navigator.clipboard.writeText(r.url); toast('Link copiado.'); }
+      })
+      .catch(function () { toast('Não consegui gerar o link agora.'); });
+  });
+
+  function renderSignCard() {
+    var el = $('#sign-card');
+    if (!el) return;
+    if (!job.signUrl && !job.signedAt) { el.hidden = true; return; }
+    el.hidden = false;
+    var html = '';
+    if (job.signUrl) {
+      html += '<span class="field-label">Link de assinatura</span>' +
+        '<p style="word-break:break-all;font-family:\'IBM Plex Mono\',monospace;font-size:12px;margin:0 0 10px">' +
+        job.signUrl + '</p>' +
+        '<button class="btn btn-ghost btn-block" id="btn-copy-link">Copiar link</button>';
+    }
+    el.innerHTML = html;
+    var cp2 = $('#btn-copy-link');
+    if (cp2) cp2.addEventListener('click', function () {
+      navigator.clipboard.writeText(job.signUrl);
+      toast('Link copiado.');
+    });
+  }
+
+  // ao abrir o orçamento, busca se já foi assinado
+  function checkSignature(tries) {
+    tries = tries || 0;
+    if (!job || !job.savedAt) return;
+    if (cloud.on === false) return;
+    if (!cloud.user) {                       // login ainda não confirmou: tenta de novo
+      if (tries < 6) setTimeout(function () { checkSignature(tries + 1); }, 900);
+      return;
+    }
+    var alvo = job.id;
+    Api.signature(alvo).then(function (r) {
+      if (!job || job.id !== alvo) return;   // trocou de orçamento no meio
+      if (!r.signature) return;
+      job.signedAt = r.signature.signed_at;
+      job.signedBy = r.signature.signer_name;
+      job.signatureImg = r.signature.signature;
+      var el = $('#sign-card');
+      el.hidden = false;
+      el.innerHTML =
+        '<span class="field-label">Assinado pelo cliente</span>' +
+        '<p style="margin:0 0 8px"><b>' + r.signature.signer_name + '</b> · ' +
+        new Date(r.signature.signed_at).toLocaleString('pt-BR') + '</p>' +
+        '<img src="' + r.signature.signature + '" alt="assinatura" ' +
+        'style="width:100%;max-height:130px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:10px">';
+      if (job.status !== 'accepted') { setStatus('accepted'); }
+    }).catch(function () {});
   }
 
   /* ---------- clientes / histórico ---------- */
