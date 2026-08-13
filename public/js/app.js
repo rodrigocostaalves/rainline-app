@@ -21,7 +21,7 @@
   var ft = function (n) { return Math.round(Number(n) || 0) + ' ft'; };
 
   function toast(msg) {
-    var t = $('#toast'); t.textContent = msg; t.classList.add('is-on');
+    var t = $('#toast'); t.textContent = (window.I18N ? I18N.t(msg) : msg); t.classList.add('is-on');
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('is-on'); }, 2600);
   }
 
@@ -40,7 +40,7 @@
     if (name === 'quote') renderQuote();
     if (name === 'clients') renderClients();
     if (name === 'history') renderHistory();
-    if (name === 'settings') { fillSettings(); renderCloudCard(); }
+    if (name === 'settings') { fillSettings(); renderCloudCard(); markLang(); }
   }
   // pai de cada tela, para o botão voltar do aparelho andar dentro do app
   var PARENT = {
@@ -1302,6 +1302,7 @@
   }
 
   function renderParts() {
+    if (window.__i18nAfter) window.__i18nAfter();
     var m = Calc.measure(job.runs, settings.calibration, job.manual);
     $('#parts-total').textContent = Math.round(m.feet);
 
@@ -2542,6 +2543,7 @@
   }
 
   function renderMaterials() {
+    if (window.__i18nAfter) window.__i18nAfter();
     var d = currentList();
     $('#mat-feet').textContent = ft(d.m.feet);
     $('#mat-corners').textContent = d.m.corners + ' cantos';
@@ -2677,6 +2679,7 @@
 
   /* ---------- orçamento ---------- */
   function renderQuote() {
+    if (window.__i18nAfter) window.__i18nAfter();
     var d = currentList();
     setStatus(job.status || 'draft');
     $('#btn-delete-job').style.display = job.savedAt ? '' : 'none';
@@ -3239,6 +3242,7 @@
 
   /* ---------- clientes / histórico ---------- */
   function renderClients() {
+    if (window.__i18nAfter) window.__i18nAfter();
     var seen = {}, out = [];
     jobs.forEach(function (j) {
       var key = (j.client.name || '') + '|' + (j.client.address || '');
@@ -3252,6 +3256,7 @@
   }
 
   function renderHistory() {
+    if (window.__i18nAfter) window.__i18nAfter();
     $('#history-list').innerHTML = jobs.length ? jobs.map(function (j) {
       var st = ST[j.status] || ST.draft;
       return '<div class="list-item" data-open="' + j.id + '"><div class="li-main"><b>' + (j.client.name || 'Sem nome') + '</b>' +
@@ -3323,7 +3328,27 @@
     });
   });
 
+  window.__i18nAfter = function () {
+    if (window.I18N && I18N.lang !== 'pt') setTimeout(function () { I18N.apply(); }, 0);
+  };
+
+  /* ---------- idioma ---------- */
+  function markLang() {
+    $$('#lang-row .lang-btn').forEach(function (b) {
+      b.classList.toggle('is-on', b.dataset.lang === I18N.lang);
+    });
+  }
+  $$('#lang-row .lang-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      I18N.set(b.dataset.lang);
+      markLang();
+      renderHome();
+    });
+  });
+
   /* ---------- boot ---------- */
+  I18N.init();
+  markLang();
   if (load(K.sess, null)) go('home');
   armBack();
   bootCloud();
