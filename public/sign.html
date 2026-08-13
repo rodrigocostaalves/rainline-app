@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estimate — sign</title>
+<meta name="theme-color" content="#0E1317">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body{background:var(--alum)}
+  .wrap{max-width:600px;margin:0 auto;padding:0 16px calc(40px + var(--safe-b))}
+  .head{
+    background:linear-gradient(160deg,var(--storm-b),var(--storm-a));color:#fff;
+    padding:calc(22px + var(--safe-t)) 16px 22px;margin-bottom:16px;position:relative;
+  }
+  .head:after{
+    content:"";position:absolute;left:0;right:0;bottom:0;height:3px;
+    background:linear-gradient(90deg,var(--tape) 0 34%,var(--patina) 34% 58%,var(--coil) 58%);
+  }
+  .head h1{font-size:24px}
+  .head p{margin:4px 0 0;color:#A9B4BC;font-size:13px}
+  .big-total{
+    display:flex;justify-content:space-between;align-items:center;
+    background:linear-gradient(150deg,var(--storm-b),var(--storm-a));color:#fff;
+    border-radius:var(--r);padding:18px;border-bottom:4px solid var(--tape);margin-bottom:14px;
+  }
+  .big-total span{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.18em;color:var(--tape)}
+  .big-total b{font-family:"IBM Plex Mono",monospace;font-size:32px;letter-spacing:-.04em}
+  .pad-sign{
+    background:#fff;border:2px dashed var(--line);border-radius:12px;
+    height:190px;touch-action:none;display:block;width:100%;
+  }
+  .sign-hint{text-align:center;color:var(--ink-3);font-size:12.5px;margin:8px 0 0}
+  .done{
+    background:var(--patina);color:#fff;border-radius:var(--r);padding:20px;text-align:center;
+  }
+  .done b{display:block;font-size:19px;margin-bottom:6px}
+  .legal{font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:14px}
+  .load{text-align:center;padding:60px 20px;color:var(--ink-2)}
+  .signform.hide{display:none !important}
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1 id="co">Estimate</h1>
+  <p id="sub">Loading…</p>
+</div>
+
+<div class="wrap" id="wrap">
+  <div class="load" id="load">Loading your estimate…</div>
+
+  <div id="main" hidden>
+    <div class="card">
+      <div class="q-head">
+        <h3 id="cli"></h3>
+        <p id="addr"></p>
+        <p id="meas"></p>
+      </div>
+      <div id="lines"></div>
+    </div>
+
+    <div class="big-total"><span>TOTAL</span><b id="total">$0.00</b></div>
+
+    <div id="signed" hidden>
+      <div class="done">
+        <b>Signed — thank you!</b>
+        <span id="signed-by"></span>
+      </div>
+    </div>
+
+    <div id="form" class="signform">
+      <div class="card">
+        <label class="field">
+          <span>Your full name</span>
+          <input type="text" id="name" autocomplete="name" placeholder="John Carter">
+        </label>
+        <span class="field-label">Sign below with your finger</span>
+        <canvas class="pad-sign" id="pad"></canvas>
+        <p class="sign-hint">
+          <button class="btn btn-ghost" id="clear" style="padding:8px 16px;font-size:13px;display:inline-flex">Clear</button>
+        </p>
+      </div>
+      <button class="btn btn-primary btn-block" id="send">Accept and sign</button>
+      <p class="legal">
+        By signing you accept this estimate and authorize the work described above.
+        Your name, signature, date and device information are recorded with this
+        acceptance. Final quantities may vary within 5% after on-site verification.
+      </p>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var token = new URLSearchParams(location.search).get('t');
+  var money = function (n) {
+    return '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  function toast(m) {
+    var t = $('#toast'); t.textContent = m; t.classList.add('is-on');
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.remove('is-on'); }, 3000);
+  }
+
+  if (!token) { $('#load').textContent = 'Invalid link.'; return; }
+
+  fetch('/api/public/' + encodeURIComponent(token))
+    .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+    .then(render)
+    .catch(function () { $('#load').textContent = 'Estimate not found or no longer available.'; });
+
+  function render(d) {
+    $('#load').hidden = true;
+    $('#main').hidden = false;
+    $('#co').textContent = (d.company && d.company.name) || 'Your gutter estimate';
+    $('#sub').textContent = [(d.company && d.company.phone), (d.company && d.company.email)]
+      .filter(Boolean).join(' · ') || 'Estimate ' + d.id;
+    $('#cli').textContent = d.client.name || '';
+    $('#addr').textContent = [d.client.address, d.client.city, d.client.state, d.client.zip]
+      .filter(Boolean).join(', ');
+    $('#meas').textContent = Math.round(d.feet) + ' ft of ' + d.size + '" gutter';
+    $('#total').textContent = money(d.total);
+    $('#lines').innerHTML = (d.lines || []).map(function (l) {
+      return '<div class="q-line"><span>' + l.name +
+        (l.qty ? '<br><span class="qty">' + l.qty + ' ' + (l.unit || '') + '</span>' : '') +
+        '</span><span>' + money(l.total) + '</span></div>';
+    }).join('');
+
+    if (d.signed) {
+      $('#form').classList.add('hide');
+      $('#signed').hidden = false;
+      $('#signed-by').textContent = d.signed.name + ' · ' +
+        new Date(d.signed.at).toLocaleDateString('en-US');
+    } else {
+      initPad();
+    }
+  }
+
+  var drew = false;
+  function initPad() {
+    var c = $('#pad'), g = c.getContext('2d');
+    function size() {
+      var r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      var data = drew ? c.toDataURL() : null;
+      c.width = r.width * dpr; c.height = r.height * dpr;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.lineWidth = 2.6; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#0E1317';
+      if (data) { var im = new Image(); im.onload = function () { g.drawImage(im, 0, 0, r.width, r.height); }; im.src = data; }
+    }
+    size();
+    window.addEventListener('resize', size);
+
+    var drawing = false, last = null;
+    function pos(e) {
+      var r = c.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+    c.addEventListener('pointerdown', function (e) {
+      c.setPointerCapture(e.pointerId);
+      drawing = true; last = pos(e); drew = true;
+      g.beginPath(); g.moveTo(last.x, last.y); g.lineTo(last.x + 0.1, last.y); g.stroke();
+    });
+    c.addEventListener('pointermove', function (e) {
+      if (!drawing) return;
+      e.preventDefault();
+      var p = pos(e);
+      g.beginPath(); g.moveTo(last.x, last.y); g.lineTo(p.x, p.y); g.stroke();
+      last = p;
+    });
+    ['pointerup', 'pointercancel'].forEach(function (ev) {
+      c.addEventListener(ev, function () { drawing = false; });
+    });
+
+    $('#clear').addEventListener('click', function () {
+      g.clearRect(0, 0, c.width, c.height); drew = false;
+    });
+
+    $('#send').addEventListener('click', function () {
+      var name = $('#name').value.trim();
+      if (name.length < 3) { toast('Please type your full name.'); return; }
+      if (!drew) { toast('Please sign in the box.'); return; }
+      $('#send').disabled = true;
+      fetch('/api/public/' + encodeURIComponent(token) + '/sign', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name, signature: c.toDataURL('image/png') })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) {
+            $('#send').disabled = false;
+            toast(res.j.error === 'already signed' ? 'This estimate was already signed.' : 'Could not sign. Try again.');
+            return;
+          }
+          $('#form').classList.add('hide');
+          $('#signed').hidden = false;
+          $('#signed-by').textContent = name + ' · ' + new Date().toLocaleDateString('en-US');
+          window.scrollTo(0, 0);
+        })
+        .catch(function () { $('#send').disabled = false; toast('No connection. Try again.'); });
+    });
+  }
+})();
+</script>
+</body>
+</html>
