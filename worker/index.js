@@ -278,8 +278,11 @@ async function publicJob(env, token) {
     client: d.client || {},
     feet: d.feet || 0,
     size: d.size || 5,
+    corners: d.corners || 0,
+    downspouts: d.downspouts || 0,
     total: row.total || 0,
     lines: d.publicLines || [],
+    images: d.publicImages || [],
     company: d.company || {},
     signed: sig ? { name: sig.signer_name, at: sig.signed_at } : null
   });
