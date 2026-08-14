@@ -437,6 +437,9 @@
   }
 
   var LAYERS = [
+    { id: 'mapbox', name: 'Mapbox', type: 'xyz', max: 22, needsToken: true,
+      url: 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/512/{z}/{x}/{y}@2x?access_token={token}',
+      credit: '© Mapbox © Maxar' },
     { id: 'esri', name: 'Esri', type: 'xyz', max: 19,
       url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       credit: 'Imagery © Esri, Maxar, Earthstar Geographics' },
@@ -454,6 +457,11 @@
 
   function makeLayer(def) {
     var o = { maxNativeZoom: def.max, maxZoom: 22, attribution: def.credit };
+    if (def.needsToken) {
+      if (!settings.mapboxToken) return null;
+      o.tileSize = 512; o.zoomOffset = -1;
+      return L.tileLayer(def.url.replace('{token}', settings.mapboxToken), o);
+    }
     if (def.type === 'arcgis') {
       defineArcGISExport();
       o.base = def.base;
@@ -466,13 +474,18 @@
     if (!map) return;
     layerIdx = (i + LAYERS.length) % LAYERS.length;
     var def = LAYERS[layerIdx];
+    var novo = makeLayer(def);
+    if (!novo) {                       // Mapbox sem chave: pula para a próxima
+      toast('Cadastre a chave do Mapbox em Configurações.');
+      return applyLayer(layerIdx + 1);
+    }
     if (baseLayer) map.removeLayer(baseLayer);
-    baseLayer = makeLayer(def).addTo(map);
+    baseLayer = novo.addTo(map);
     baseLayer.bringToBack();
     if (loupeMap) {
       if (loupeBase) loupeMap.removeLayer(loupeBase);
-      loupeBase = makeLayer(def).addTo(loupeMap);
-      loupeBase.bringToBack();
+      var lb = makeLayer(def);
+      if (lb) { loupeBase = lb.addTo(loupeMap); loupeBase.bringToBack(); }
     }
     $('#btn-layer').textContent = 'Imagem: ' + def.name;
     try { localStorage.setItem('rainline.layer', def.id); } catch (e) {}
@@ -621,34 +634,6 @@
   }
 
   /* ---------- detectar o telhado ---------- */
-  function detectRoof() {
-    if (!map) return;
-    var c = map.getCenter();
-    toast('Procurando o contorno do telhado…');
-    var q = '[out:json][timeout:20];way(around:28,' + c.lat.toFixed(6) + ',' + c.lng.toFixed(6) + ')["building"];out geom;';
-    fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(q) })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        var ways = (d.elements || []).filter(function (w) { return w.geometry && w.geometry.length > 3; });
-        if (!ways.length) { toast('Nenhum contorno encontrado aqui. Desenhe na mão.'); return; }
-        // o mais próximo do centro da tela
-        ways.sort(function (a, b) { return distToCenter(a, c) - distToCenter(b, c); });
-        var g = ways[0].geometry.map(function (n) { return { lat: n.lat, lng: n.lon }; });
-        job.runs.push({ points: g });
-        selected = job.runs.length - 1;
-        renderDraw();
-        setMapMode('edit');
-        toast('Contorno encontrado. Apague os lados sem calha e ajuste os cantos.');
-      })
-      .catch(function () { toast('Não consegui consultar agora. Desenhe na mão.'); });
-  }
-
-  function distToCenter(w, c) {
-    var lat = 0, lng = 0;
-    w.geometry.forEach(function (n) { lat += n.lat; lng += n.lon; });
-    lat /= w.geometry.length; lng /= w.geometry.length;
-    return Calc.haversineFt({ lat: lat, lng: lng }, { lat: c.lat, lng: c.lng });
-  }
 
   /* ---------- lupa de precisão ---------- */
   var loupeMap = null, loupeLayer = null;
@@ -860,7 +845,7 @@
       for (var ty = ty0; ty <= ty1; ty++) {
         (function (tx, ty) {
           var sx = Math.floor(tx / scale), sy = Math.floor(ty / scale);
-          var url = def.url.replace('{z}', nz).replace('{x}', sx).replace('{y}', sy);
+          var url = tileUrl(def, nz, sx, sy);
           jobs2.push(loadTile(url).then(function (im) {
             if (!im) return;
             var dx = (tx - tx0) * 256, dy = (ty - ty0) * 256;
@@ -1216,7 +1201,6 @@
     b.addEventListener('click', function () { setMapMode(b.dataset.mapmode); });
   });
   $('#btn-detect').addEventListener('click', startPickHouse);
-  $('#btn-detect-osm').addEventListener('click', detectRoof);
   $('#btn-undo').addEventListener('click', function () {
     if (!job || !job.runs.length) return;
     var i = (selected != null && job.runs[selected]) ? selected : job.runs.length - 1;
@@ -2798,6 +2782,12 @@
     return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * ws;
   }
 
+  function tileUrl(def, z, x, y) {
+    var u = def.url.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+    if (def.needsToken) u = u.replace('{token}', settings.mapboxToken || '');
+    return u;
+  }
+
   function loadTile(url) {
     return new Promise(function (res) {
       var im = new Image();
@@ -2858,7 +2848,7 @@
       for (var ty = ty0; ty <= ty1; ty++) {
         (function (tx, ty) {
           var sx = Math.floor(tx / scale), sy = Math.floor(ty / scale);
-          var url = def.url.replace('{z}', nz).replace('{x}', sx).replace('{y}', sy);
+          var url = tileUrl(def, nz, sx, sy);
           jobs.push(loadTile(url).then(function (im) {
             if (!im) return;
             var dx = (tx - tx0) * 256, dy = (ty - ty0) * 256;

@@ -4,7 +4,7 @@
   'use strict';
 
   var DEFAULTS = {
-    company: '', phone: '', email: '', license: '',
+    company: '', phone: '', email: '', license: '', mapboxToken: '',
     user: 'admin', pass: '1234',
     minJob: 0,
     // custo do material + mão de obra
