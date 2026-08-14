@@ -166,6 +166,7 @@
 
   function pushJob(job) {
     if (cloud.on === false) return Promise.resolve(false);
+    if (!cloud.user) return Promise.resolve(false);
     return uploadPhotos(job).then(function () {
       return Api.putJob(job.id, job, job.savedAt || 0);
     }).then(function (r) {
@@ -175,6 +176,11 @@
       return true;
     }).catch(function (err) {
       if (err.code === 401) { cloud.user = null; }
+      else if (err.code === 409) {          // a nuvem tem versão mais nova: aceita a dela
+        job.pending = false;
+        save(K.jobs, jobs);
+        return true;
+      }
       else if (err.code === undefined) cloud.on = false;
       return false;
     });
@@ -185,8 +191,11 @@
     if (!quiet) setSync('pending', 'Sincronizando…');
 
     var out = jobs.filter(function (j) { return j.pending; });
+    var falhou = 0;
     return out.reduce(function (chain, j) {
-      return chain.then(function () { return pushJob(j); });
+      return chain.then(function () {
+        return pushJob(j).then(function (ok) { if (!ok) falhou++; });
+      });
     }, Promise.resolve())
       .then(function () { return Api.jobs(0); })
       .then(function (r) {
@@ -206,6 +215,7 @@
         save(K.jobs, jobs);
         refreshSyncBar();
         renderHome();
+        if (falhou && !quiet) toast(falhou + ' orçamento(s) não subiram. Tente de novo.');
       })
       .catch(function (err) {
         if (err.code === undefined) cloud.on = false;
@@ -3271,8 +3281,29 @@
     job.total = p.total;
     job.feet = d.m.feet;
 
-    saveJob(true);
-    pushJob(jobs.filter(function (x) { return x.id === job.id; })[0] || job)
+    job.corners = d.m.corners;
+    job.downspouts = Calc.qty(d.list, 'dsCount');
+
+    // monta as mesmas imagens do PDF para o cliente ver
+    var shots = (job.manual || []).map(function (e) {
+      return photoImage(e).then(function (png) {
+        return { png: png, label: Math.round(e.feet) + ' ft' };
+      });
+    });
+    Promise.all([mapImage()].concat(shots))
+      .then(function (all) {
+        var imgs = [];
+        if (all[0]) imgs.push({ png: all[0], label: 'Aerial measurement' });
+        all.slice(1).forEach(function (o) {
+          if (o.png) imgs.push({ png: o.png, label: 'Facade · ' + o.label });
+        });
+        job.publicImages = imgs;
+      })
+      .catch(function () { job.publicImages = []; })
+      .then(function () {
+        saveJob(true);
+        return pushJob(jobs.filter(function (x) { return x.id === job.id; })[0] || job);
+      })
       .then(function () { return Api.shareLink(job.id); })
       .then(function (r) {
         job.signUrl = r.url;
@@ -3329,7 +3360,13 @@
         new Date(r.signature.signed_at).toLocaleString('pt-BR') + '</p>' +
         '<img src="' + r.signature.signature + '" alt="assinatura" ' +
         'style="width:100%;max-height:130px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:10px">';
-      if (job.status !== 'accepted') { setStatus('accepted'); }
+      if (job.status !== 'accepted') {
+        setStatus('accepted');
+        job.signedAt = r.signature.signed_at;
+        job.signedBy = r.signature.signer_name;
+        saveJob(true);            // grava no aparelho e sobe para a nuvem
+        renderHome();
+      }
     }).catch(function () {});
   }
 
@@ -3348,15 +3385,43 @@
     }).join('') : '<p class="empty">Nenhum cliente ainda. Todo orçamento salvo cria um cliente aqui.</p>';
   }
 
+  var histFilter = 'all';
+
+  $$('[data-filter]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      histFilter = b.dataset.filter === 'closed' ? 'accepted' : 'month';
+      go('history');
+    });
+  });
+
+  $$('#hist-filters .hf').forEach(function (b) {
+    b.addEventListener('click', function () { histFilter = b.dataset.hf; renderHistory(); });
+  });
+
+  function histMatch(j2) {
+    if (histFilter === 'all') return true;
+    if (histFilter === 'accepted') return j2.status === 'accepted';
+    if (histFilter === 'sent') return j2.status === 'sent';
+    if (histFilter === 'month') {
+      var d = new Date(j2.savedAt), n = new Date();
+      return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
+    }
+    return true;
+  }
+
   function renderHistory() {
     if (window.__i18nAfter) window.__i18nAfter();
-    $('#history-list').innerHTML = jobs.length ? jobs.map(function (j) {
+    $$('#hist-filters .hf').forEach(function (b) {
+      b.classList.toggle('is-on', b.dataset.hf === histFilter);
+    });
+    var lista = jobs.filter(histMatch);
+    $('#history-list').innerHTML = lista.length ? lista.map(function (j) {
       var st = ST[j.status] || ST.draft;
       return '<div class="list-item" data-open="' + j.id + '"><div class="li-main"><b>' + (j.client.name || 'Sem nome') + '</b>' +
         '<small>' + new Date(j.savedAt).toLocaleDateString('pt-BR') + ' · ' + ft(j.feet) +
         ' · <span class="st-tag ' + st.cls + '">' + st.label + '</span></small></div>' +
         '<span class="li-val">' + money(j.total) + '</span></div>';
-    }).join('') : '<p class="empty">Nenhum orçamento salvo ainda.</p>';
+    }).join('') : '<p class="empty">Nenhum orçamento nesta lista.</p>';
   }
 
   $('#history-list').addEventListener('click', function (e) {
