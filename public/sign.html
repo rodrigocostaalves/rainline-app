@@ -40,6 +40,15 @@
   .done b{display:block;font-size:19px;margin-bottom:6px}
   .legal{font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:14px}
   .load{text-align:center;padding:60px 20px;color:var(--ink-2)}
+  .shot{
+    background:#fff;border:1px solid var(--line);border-radius:var(--r);
+    padding:12px;margin-bottom:14px;box-shadow:var(--sh-1);
+  }
+  .shot img{width:100%;border-radius:10px;display:block;background:var(--coil)}
+  .shot span{
+    display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin-bottom:8px;
+  }
   .signform.hide{display:none !important}
 </style>
 </head>
@@ -54,6 +63,8 @@
   <div class="load" id="load">Loading your estimate…</div>
 
   <div id="main" hidden>
+    <div id="imgs"></div>
+
     <div class="card">
       <div class="q-head">
         <h3 id="cli"></h3>
@@ -124,7 +135,16 @@
     $('#cli').textContent = d.client.name || '';
     $('#addr').textContent = [d.client.address, d.client.city, d.client.state, d.client.zip]
       .filter(Boolean).join(', ');
-    $('#meas').textContent = Math.round(d.feet) + ' ft of ' + d.size + '" gutter';
+    var extra = [];
+    if (d.corners) extra.push(d.corners + ' corners');
+    if (d.downspouts) extra.push(d.downspouts + ' downspouts');
+    $('#meas').textContent = Math.round(d.feet) + ' ft of ' + d.size + '" gutter' +
+      (extra.length ? ' · ' + extra.join(' · ') : '');
+
+    $('#imgs').innerHTML = (d.images || []).map(function (im) {
+      return '<div class="shot"><span>' + im.label + '</span>' +
+             '<img src="' + im.png + '" alt="' + im.label + '"></div>';
+    }).join('');
     $('#total').textContent = money(d.total);
     $('#lines').innerHTML = (d.lines || []).map(function (l) {
       return '<div class="q-line"><span>' + l.name +

@@ -24,7 +24,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.35</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.36</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -58,8 +58,8 @@
       <button class="sync-btn" id="btn-sync">Sincronizar</button>
     </div>
     <div class="stat-strip">
-      <div class="stat"><b id="stat-month">0</b><span>Orçamentos no mês</span></div>
-      <div class="stat"><b id="stat-value">$0</b><span>Fechado no mês</span></div>
+      <button class="stat" data-filter="month"><b id="stat-month">0</b><span>Orçamentos no mês</span></button>
+      <button class="stat" data-filter="closed"><b id="stat-value">$0</b><span>Fechado no mês</span></button>
     </div>
     <div class="menu-grid">
       <button class="tile tile-primary" data-go="job">
@@ -438,7 +438,15 @@
     <button class="btn-icon" data-back="home" aria-label="Voltar"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
     <div><h2 class="topbar-title">Histórico</h2></div><span></span>
   </header>
-  <div class="pad"><div id="history-list" class="list"></div></div>
+  <div class="pad">
+    <div class="hist-filters" id="hist-filters">
+      <button class="hf is-on" data-hf="all">Todos</button>
+      <button class="hf" data-hf="month">Do mês</button>
+      <button class="hf" data-hf="accepted">Fechados</button>
+      <button class="hf" data-hf="sent">Em análise</button>
+    </div>
+    <div id="history-list" class="list"></div>
+  </div>
 </section>
 
 <!-- ============ CONFIGURAÇÕES ============ -->
@@ -535,7 +543,7 @@
     <button class="btn btn-primary btn-block" id="btn-save-settings">Salvar configurações</button>
     <button class="btn btn-ghost btn-block" id="btn-export">Exportar dados (backup)</button>
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.35</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.36</b></p>
   </div>
 </section>
 
