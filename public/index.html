@@ -24,7 +24,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.37</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.38</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -358,6 +358,7 @@
       <div class="seg" id="seg-size" role="group" aria-label="Tamanho da calha">
         <button type="button" class="seg-btn is-on" data-size="5">Calha 5"</button>
         <button type="button" class="seg-btn" data-size="6">Calha 6"</button>
+        <button type="button" class="seg-btn" data-size="7">Calha 7"</button>
       </div>
       <div class="row-2">
         <label class="field"><span>Pavimentos</span>
@@ -481,6 +482,7 @@
           <label class="field"><span>Calha 5" material ($/ft)</span><input type="number" id="d-lf5" step="0.25" inputmode="decimal"></label>
           <label class="field"><span>Calha 6" material ($/ft)</span><input type="number" id="d-lf6" step="0.25" inputmode="decimal"></label>
         </div>
+        <label class="field"><span>Calha 7" material ($/ft)</span><input type="number" id="d-lf7" step="0.25" inputmode="decimal"></label>
         <div class="row-2">
           <label class="field"><span>Downspout ($/ft)</span><input type="number" id="d-ds" step="0.25" inputmode="decimal"></label>
           <label class="field"><span>Elbow ($)</span><input type="number" id="d-elbow" step="0.25" inputmode="decimal"></label>
@@ -494,6 +496,18 @@
           <label class="field"><span>Splash block ($)</span><input type="number" id="d-splash" step="0.5" inputmode="decimal"></label>
         </div>
         <label class="field"><span>Mão de obra ($/ft)</span><input type="number" id="d-labor" step="0.25" inputmode="decimal"></label>
+
+        <h4 style="margin:18px 0 8px;font-size:14px">Acessórios da calha 7"</h4>
+        <p class="hint" style="margin:0 0 10px">A de 7" usa downspout 3x4 e ferragem reforçada, mais cara que a de 5" e 6".</p>
+        <div class="row-2">
+          <label class="field"><span>Downspout 3x4 ($/ft)</span><input type="number" id="d-ds7" step="0.25" inputmode="decimal"></label>
+          <label class="field"><span>Elbow 3x4 ($)</span><input type="number" id="d-elbow7" step="0.25" inputmode="decimal"></label>
+        </div>
+        <div class="row-2">
+          <label class="field"><span>Miter 7" ($)</span><input type="number" id="d-miter7" step="0.5" inputmode="decimal"></label>
+          <label class="field"><span>End cap 7" ($)</span><input type="number" id="d-cap7" step="0.25" inputmode="decimal"></label>
+        </div>
+        <label class="field"><span>Hanger 7" ($)</span><input type="number" id="d-hanger7" step="0.25" inputmode="decimal"></label>
       </div>
       <label class="field"><span>Valor mínimo do serviço ($)</span><input type="number" id="p-min" step="10" inputmode="decimal"></label>
       <label class="field"><span>Minha margem (%)</span><input type="number" id="p-mpct" step="1" inputmode="decimal"></label>
@@ -546,7 +560,7 @@
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
     <a class="btn btn-ghost btn-block" href="privacidade.html" target="_blank" rel="noopener"
        style="text-decoration:none">Política de privacidade</a>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.37</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.38</b></p>
   </div>
 </section>
 
