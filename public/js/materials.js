@@ -15,7 +15,7 @@
     marginPct: 20,
     // regras
     hangerSpacingIn: 24,   // Flórida: 24" por causa de vento/chuva forte
-    dsEveryFt: 35,         // 1 descida a cada ~35 ft de calha
+    dsEveryFt: 30,         // 1 descida a cada 30 ft de calha
     wastePct: 10,
     calibration: 1.00
   };

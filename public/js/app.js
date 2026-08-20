@@ -11,6 +11,17 @@
   function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast('Sem espaço para salvar neste aparelho.'); } }
 
   var settings = Object.assign({}, Calc.DEFAULTS, load(K.set, {}));
+
+  // migração única: o padrão de descidas passou de 35 para 30 ft
+  (function () {
+    try {
+      if (!localStorage.getItem('rainline.ds30') && settings.dsEveryFt === 35) {
+        settings.dsEveryFt = 30;
+        save(K.set, settings);
+      }
+      localStorage.setItem('rainline.ds30', '1');
+    } catch (e) {}
+  })();
   var jobs = load(K.jobs, []);
   var job = null;      // orçamento em edição
   var map = null, drawLayer = null;
