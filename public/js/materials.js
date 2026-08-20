@@ -8,8 +8,9 @@
     user: 'admin', pass: '1234',
     minJob: 0,
     // custo do material + mão de obra
-    d_lf5: 2.20, d_lf6: 3.10, d_ds: 2.40, d_elbow: 4.50,
+    d_lf5: 2.20, d_lf6: 3.10, d_lf7: 3.85, d_ds: 2.40, d_elbow: 4.50,
     d_miter: 12.00, d_cap: 3.50, d_hanger: 3.20, d_splash: 8.00,
+    d_ds7: 3.60, d_elbow7: 6.50, d_miter7: 20.00, d_cap7: 5.50, d_hanger7: 4.20,
     d_labor: 3.50,
     marginPct: 20,
     // regras
@@ -95,6 +96,7 @@
     var stories = String(s.stories || 1);
     var dsLen = FT_PER_STORY[stories] || 12;
 
+    var size7 = String(s.size || 5) === '7';
     var gutterFt = Math.ceil(feet * (1 + s.wastePct / 100));
 
     // uma descida do 2º andar gasta o dobro de cano de uma do térreo
@@ -105,25 +107,28 @@
       anyLevel = true;
       var lvFeet = levels[lv];
       var lvRuns = (m.runsByLevel || {})[lv] || 1;
-      var n = lvFeet > 0 ? Math.max(lvRuns, Math.ceil(lvFeet / s.dsEveryFt)) : 0;
+      var passo = s.dsEveryFt * (size7 ? 1.5 : 1);
+      var n = lvFeet > 0 ? Math.max(lvRuns, Math.ceil(lvFeet / passo)) : 0;
       var h = FT_PER_STORY[lv] || 12;
       dsCount += n;
       dsFt += n * h;
       straps += n * (lv === '1' ? 2 : lv === '2' ? 4 : 6);
     });
     if (!anyLevel && feet > 0) {           // compatível com orçamentos antigos
-      dsCount = Math.max(m.runs || 1, Math.ceil(feet / s.dsEveryFt));
+      dsCount = Math.max(m.runs || 1, Math.ceil(feet / (s.dsEveryFt * (size7 ? 1.5 : 1))));
       dsFt = dsCount * dsLen;
       straps = dsCount * (stories === '1' ? 2 : stories === '2' ? 4 : 6);
     }
-    var hangers = Math.ceil(feet / (s.hangerSpacingIn / 12));
+    var espac = s.hangerSpacingIn * (size7 ? 0.75 : 1);
+    var hangers = Math.ceil(feet / (espac / 12));
 
     return [
       { key: 'gutter', name: (s.size || 5) + '" Seamless Gutter', note: 'inclui ' + s.wastePct + '% de perda', qty: gutterFt, unit: 'ft' },
       { key: 'miters', name: 'Miters / Corners', note: 'cantos medidos no mapa', qty: m.corners, unit: 'ea' },
       { key: 'caps', name: 'End Caps', note: '2 por linha aberta', qty: m.ends, unit: 'ea' },
-      { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + s.hangerSpacingIn + '"', qty: hangers, unit: 'ea' },
-      { key: 'dsCount', name: 'Downspouts', note: '1 a cada ' + s.dsEveryFt + ' ft', qty: dsCount, unit: 'ea' },
+      { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + Math.round(espac) + '"', qty: hangers, unit: 'ea' },
+      { key: 'dsCount', name: 'Downspouts' + (size7 ? ' 3x4' : ''),
+        note: '1 a cada ' + Math.round(s.dsEveryFt * (size7 ? 1.5 : 1)) + ' ft', qty: dsCount, unit: 'ea' },
       { key: 'dsFt', name: 'Downspout (comprimento)', note: 'altura conforme o nível de cada linha', qty: dsFt, unit: 'ft' },
       { key: 'elbows', name: 'Elbows', note: '3 por descida (2 em cima, 1 embaixo)', qty: dsCount * 3, unit: 'ea' },
       { key: 'straps', name: 'Downspout Straps', note: '2 por andar de descida', qty: straps, unit: 'ea' },
@@ -153,12 +158,13 @@
 
     var gutterFt = qty(list, 'gutter');
 
-    add(size + '" Seamless Gutter', gutterFt, size === '6' ? s.d_lf6 : s.d_lf5, 'ft');
-    add('Miters / Corners', qty(list, 'miters'), s.d_miter);
-    add('End Caps', qty(list, 'caps'), s.d_cap);
-    add('Hidden Hangers', qty(list, 'hangers'), s.d_hanger);
-    add('Downspout', qty(list, 'dsFt'), s.d_ds, 'ft');
-    add('Elbows', qty(list, 'elbows'), s.d_elbow);
+    var is7 = size === '7';
+    add(size + '" Seamless Gutter', gutterFt, is7 ? s.d_lf7 : (size === '6' ? s.d_lf6 : s.d_lf5), 'ft');
+    add('Miters / Corners', qty(list, 'miters'), is7 ? s.d_miter7 : s.d_miter);
+    add('End Caps', qty(list, 'caps'), is7 ? s.d_cap7 : s.d_cap);
+    add('Hidden Hangers', qty(list, 'hangers'), is7 ? s.d_hanger7 : s.d_hanger);
+    add('Downspout', qty(list, 'dsFt'), is7 ? s.d_ds7 : s.d_ds, 'ft');
+    add('Elbows', qty(list, 'elbows'), is7 ? s.d_elbow7 : s.d_elbow);
     add('Splash Blocks', qty(list, 'splash'), s.d_splash);
     // mão de obra: entra no custo, mas fica fora da lista que o cliente vê
     var labor = gutterFt * (Number(s.d_labor) || 0);

@@ -3430,7 +3430,9 @@
   var SET_MAP = {
     '#set-company': 'company', '#set-phone': 'phone', '#set-email': 'email', '#set-license': 'license',
     '#p-min': 'minJob',
-    '#d-lf5': 'd_lf5', '#d-lf6': 'd_lf6', '#d-ds': 'd_ds', '#d-elbow': 'd_elbow', '#d-miter': 'd_miter',
+    '#d-lf5': 'd_lf5', '#d-lf6': 'd_lf6', '#d-lf7': 'd_lf7',
+    '#d-ds7': 'd_ds7', '#d-elbow7': 'd_elbow7', '#d-miter7': 'd_miter7',
+    '#d-cap7': 'd_cap7', '#d-hanger7': 'd_hanger7', '#d-ds': 'd_ds', '#d-elbow': 'd_elbow', '#d-miter': 'd_miter',
     '#d-cap': 'd_cap', '#d-hanger': 'd_hanger', '#d-splash': 'd_splash', '#d-labor': 'd_labor',
     '#p-mpct': 'marginPct',
     '#r-hanger': 'hangerSpacingIn', '#r-ds': 'dsEveryFt', '#r-waste': 'wastePct', '#r-cal': 'calibration',
@@ -3440,6 +3442,54 @@
   function fillSettings() {
     Object.keys(SET_MAP).forEach(function (sel) { $(sel).value = settings[SET_MAP[sel]]; });
   }
+  /* ---------- conta na nuvem ---------- */
+  function renderCloudCard() {
+    var st = $('#cloud-status');
+    if (!st) return;
+    if (cloud.user) {
+      st.textContent = 'Conectado como ' + cloud.user.username +
+        (cloud.user.role === 'admin' ? ' (administrador)' : ' (vendedor)') + '.';
+      $('#admin-users').hidden = cloud.user.role !== 'admin';
+      if (cloud.user.role === 'admin') {
+        Api.users().then(function (r) {
+          $('#users-list').innerHTML = (r.users || []).map(function (u) {
+            return '<div class="user-row"><span>' + u.username + '<br><small>' +
+              (u.role === 'admin' ? 'administrador' : 'vendedor') + '</small></span>' +
+              '<small>' + (u.active ? 'ativo' : 'inativo') + '</small></div>';
+          }).join('');
+        }).catch(function () {});
+      }
+    } else {
+      st.textContent = cloud.on === false
+        ? 'Sem servidor agora. O app está salvando só neste aparelho.'
+        : 'Sessão encerrada — entre de novo para sincronizar.';
+      $('#admin-users').hidden = true;
+    }
+  }
+
+  $('#btn-pw').addEventListener('click', function () {
+    var cur = $('#pw-cur').value, nx = $('#pw-new').value;
+    if (nx.length < 4) { toast('A nova senha precisa de pelo menos 4 caracteres.'); return; }
+    Api.changePassword(cur, nx).then(function () {
+      $('#pw-cur').value = ''; $('#pw-new').value = '';
+      toast('Senha alterada.');
+    }).catch(function (err) {
+      toast(err.code === 401 ? 'Senha atual não confere.' : 'Não consegui trocar agora.');
+    });
+  });
+
+  $('#btn-new-user').addEventListener('click', function () {
+    var u = $('#nu-user').value.trim(), pw = $('#nu-pass').value;
+    if (!u || pw.length < 4) { toast('Informe usuário e senha de 4+ caracteres.'); return; }
+    Api.createUser({ username: u, password: pw, role: 'seller' }).then(function () {
+      $('#nu-user').value = ''; $('#nu-pass').value = '';
+      toast('Vendedor criado.');
+      renderCloudCard();
+    }).catch(function (err) {
+      toast(err.code === 409 ? 'Esse usuário já existe.' : 'Não consegui criar agora.');
+    });
+  });
+
   $('#btn-save-settings').addEventListener('click', function () {
     Object.keys(SET_MAP).forEach(function (sel) {
       var k = SET_MAP[sel], v = $(sel).value;
