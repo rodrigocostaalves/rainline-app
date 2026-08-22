@@ -24,7 +24,7 @@
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
       <h1 class="brand-name">RainLine</h1>
-      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.38</span></p>
+      <p class="brand-sub">Gutter Estimating · Field Kit · <span id="app-version">v0.40</span></p>
     </div>
     <form class="card login-card" id="form-login" autocomplete="on">
       <label class="field">
@@ -521,9 +521,11 @@
         <label class="field"><span>1 downspout a cada (ft)</span><input type="number" id="r-ds" step="5" inputmode="numeric"></label>
       </div>
       <div class="row-2">
+        <label class="field"><span>Comprimento da descida (ft)</span><input type="number" id="r-dslen" step="1" inputmode="numeric"></label>
         <label class="field"><span>Perda de material (%)</span><input type="number" id="r-waste" step="1" inputmode="numeric"></label>
         <label class="field"><span>Fator de calibração</span><input type="number" id="r-cal" step="0.01" inputmode="decimal"></label>
       </div>
+      <p class="hint">O comprimento vale para o térreo. Linhas marcadas como 2º ou 3º andar usam a proporção correspondente.</p>
       <p class="hint">Calibração: meça uma parede conhecida no mapa e ajuste o fator até bater com a trena. Padrão 1.00.</p>
     </div>
 
@@ -560,7 +562,7 @@
     <button class="btn btn-ghost btn-block" id="btn-refresh">Forçar atualização do app</button>
     <a class="btn btn-ghost btn-block" href="privacidade.html" target="_blank" rel="noopener"
        style="text-decoration:none">Política de privacidade</a>
-    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.38</b></p>
+    <p class="hint" style="text-align:center">Versão instalada: <b id="app-version-2">v0.40</b></p>
   </div>
 </section>
 
