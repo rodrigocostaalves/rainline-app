@@ -3446,7 +3446,8 @@
     '#d-cap7': 'd_cap7', '#d-hanger7': 'd_hanger7', '#d-ds': 'd_ds', '#d-elbow': 'd_elbow', '#d-miter': 'd_miter',
     '#d-cap': 'd_cap', '#d-hanger': 'd_hanger', '#d-splash': 'd_splash', '#d-labor': 'd_labor',
     '#p-mpct': 'marginPct',
-    '#r-hanger': 'hangerSpacingIn', '#r-ds': 'dsEveryFt', '#r-waste': 'wastePct', '#r-cal': 'calibration',
+    '#r-hanger': 'hangerSpacingIn', '#r-ds': 'dsEveryFt', '#r-dslen': 'dsLenFt',
+    '#r-waste': 'wastePct', '#r-cal': 'calibration',
     '#set-user': 'user', '#set-pass': 'pass'
   };
 

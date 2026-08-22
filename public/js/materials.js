@@ -15,12 +15,13 @@
     marginPct: 20,
     // regras
     hangerSpacingIn: 24,   // Flórida: 24" por causa de vento/chuva forte
+    dsLenFt: 13,           // comprimento de cada descida no térreo
     dsEveryFt: 30,         // 1 descida a cada 30 ft de calha
     wastePct: 10,
     calibration: 1.00
   };
 
-  var FT_PER_STORY = { 1: 12, 2: 22, 3: 32 };
+  var FT_PER_STORY = { 1: 13, 2: 24, 3: 35 };   // comprimento da descida por andar
 
   /* ---- medição ---------------------------------------------------- */
   // runs = [{ points:[{lat,lng},...] }]
@@ -94,7 +95,14 @@
     var s = Object.assign({}, DEFAULTS, cfg || {});
     var feet = Math.max(0, m.feet);
     var stories = String(s.stories || 1);
-    var dsLen = FT_PER_STORY[stories] || 12;
+    var base1 = Number(s.dsLenFt) || FT_PER_STORY[1];
+    function alturaDs(lv) {
+      var k = String(lv);
+      if (k === '1') return base1;
+      // andares acima seguem a proporção do térreo
+      return Math.round(base1 * (FT_PER_STORY[k] || FT_PER_STORY[1]) / FT_PER_STORY[1]);
+    }
+    var dsLen = alturaDs(stories);
 
     var size7 = String(s.size || 5) === '7';
     var gutterFt = Math.ceil(feet * (1 + s.wastePct / 100));
@@ -107,15 +115,14 @@
       anyLevel = true;
       var lvFeet = levels[lv];
       var lvRuns = (m.runsByLevel || {})[lv] || 1;
-      var passo = s.dsEveryFt * (size7 ? 1.5 : 1);
-      var n = lvFeet > 0 ? Math.max(lvRuns, Math.ceil(lvFeet / passo)) : 0;
-      var h = FT_PER_STORY[lv] || 12;
+      var n = lvFeet > 0 ? Math.max(lvRuns, Math.ceil(lvFeet / s.dsEveryFt)) : 0;
+      var h = alturaDs(lv);
       dsCount += n;
       dsFt += n * h;
       straps += n * (lv === '1' ? 2 : lv === '2' ? 4 : 6);
     });
     if (!anyLevel && feet > 0) {           // compatível com orçamentos antigos
-      dsCount = Math.max(m.runs || 1, Math.ceil(feet / (s.dsEveryFt * (size7 ? 1.5 : 1))));
+      dsCount = Math.max(m.runs || 1, Math.ceil(feet / s.dsEveryFt));
       dsFt = dsCount * dsLen;
       straps = dsCount * (stories === '1' ? 2 : stories === '2' ? 4 : 6);
     }
@@ -128,8 +135,9 @@
       { key: 'caps', name: 'End Caps', note: '2 por linha aberta', qty: m.ends, unit: 'ea' },
       { key: 'hangers', name: 'Hidden Hangers', note: '1 a cada ' + Math.round(espac) + '"', qty: hangers, unit: 'ea' },
       { key: 'dsCount', name: 'Downspouts' + (size7 ? ' 3x4' : ''),
-        note: '1 a cada ' + Math.round(s.dsEveryFt * (size7 ? 1.5 : 1)) + ' ft', qty: dsCount, unit: 'ea' },
-      { key: 'dsFt', name: 'Downspout (comprimento)', note: 'altura conforme o nível de cada linha', qty: dsFt, unit: 'ft' },
+        note: '1 a cada ' + s.dsEveryFt + ' ft', qty: dsCount, unit: 'ea' },
+      { key: 'dsFt', name: 'Downspout (comprimento)',
+        note: base1 + ' ft por descida no térreo', qty: dsFt, unit: 'ft' },
       { key: 'elbows', name: 'Elbows', note: '3 por descida (2 em cima, 1 embaixo)', qty: dsCount * 3, unit: 'ea' },
       { key: 'straps', name: 'Downspout Straps', note: '2 por andar de descida', qty: straps, unit: 'ea' },
       { key: 'splash', name: 'Splash Blocks', note: '1 por descida', qty: dsCount, unit: 'ea' },
